@@ -2,13 +2,26 @@
 <html lang="vi">
 <head>
 <script>
-(function(){var K='tp_cfg';function cfg(){try{return JSON.parse(localStorage.getItem(K))||{}}catch(e){return{}}}
+(function(){var K='tp_cfg',last=0;function cfg(){try{return JSON.parse(localStorage.getItem(K))||{}}catch(e){return{}}}
+function sleep(ms){return new Promise(function(r){setTimeout(r,ms)})}
 function b64(b){return new Promise(function(r){var f=new FileReader();f.onload=function(){r(f.result.split(',')[1])};f.readAsDataURL(b)})}
-async function sample(prompt,opts){opts=opts||{};var c=cfg();if(!c.key){var e=new Error('Chưa nhập API key. Bấm ⚙️ ở góc trên để nhập.');e.code='no_key';throw e}
-var content=[];for(var im of(opts.images||[]))content.push({type:'image',source:{type:'base64',media_type:'image/jpeg',data:await b64(im)}});content.push({type:'text',text:prompt});
-var r=await fetch('https://api.anthropic.com/v1/messages',{method:'POST',headers:{'content-type':'application/json','x-api-key':c.key,'anthropic-version':'2023-06-01','anthropic-dangerous-direct-browser-access':'true'},body:JSON.stringify({model:c.model||'claude-sonnet-4-6',max_tokens:6000,messages:[{role:'user',content:content}]})});
-var j=await r.json();if(!r.ok){var e2=new Error((j.error&&j.error.message)||('HTTP '+r.status));e2.code='api_'+r.status;throw e2}
-return{text:j.content.map(function(x){return x.text||''}).join('')}}
+function err(m,c){var e=new Error(m);e.code=c;return e}
+async function sample(prompt,opts){opts=opts||{};var c=cfg();if(!c.key)throw err('Chưa nhập API key. Bấm ⚙️ ở góc trên để nhập.','no_key');
+var prov=c.prov||'gemini',imgs=[];for(var im of(opts.images||[]))imgs.push(await b64(im));
+for(var at=0;at<4;at++){var r,j;
+if(prov==='gemini'){var w=6500-(Date.now()-last);if(w>0)await sleep(w);last=Date.now();
+var model=c.model||'gemini-2.5-flash',parts=imgs.map(function(d){return{inline_data:{mime_type:'image/jpeg',data:d}}});parts.push({text:prompt});
+var gc={maxOutputTokens:8192,temperature:0.7,responseMimeType:'application/json'};if(/2\.5-flash/.test(model))gc.thinkingConfig={thinkingBudget:0};
+r=await fetch('https://generativelanguage.googleapis.com/v1beta/models/'+encodeURIComponent(model)+':generateContent?key='+encodeURIComponent(c.key),{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({contents:[{role:'user',parts:parts}],generationConfig:gc})});
+j=await r.json().catch(function(){return{}});
+if(r.ok){var cd=(j.candidates||[])[0],t=cd&&cd.content&&cd.content.parts?cd.content.parts.map(function(x){return x.text||''}).join(''):'';if(!t)throw err('AI không trả về nội dung'+(cd&&cd.finishReason?' ('+cd.finishReason+')':'')+'. Thử lại nhé.','empty');return{text:t}}}
+else{var content=imgs.map(function(d){return{type:'image',source:{type:'base64',media_type:'image/jpeg',data:d}}});content.push({type:'text',text:prompt});
+r=await fetch('https://api.anthropic.com/v1/messages',{method:'POST',headers:{'content-type':'application/json','x-api-key':c.key,'anthropic-version':'2023-06-01','anthropic-dangerous-direct-browser-access':'true'},body:JSON.stringify({model:c.model||'claude-sonnet-4-6',max_tokens:6000,messages:[{role:'user',content:content}]})});
+j=await r.json().catch(function(){return{}});
+if(r.ok)return{text:(j.content||[]).map(function(x){return x.text||''}).join('')}}
+if((r.status===429||r.status===503)&&at<3){await sleep(15000);continue}
+if(r.status===429)throw err('Đã hết lượt miễn phí (giới hạn theo phút hoặc theo ngày). Chờ vài phút hoặc đến ngày mai rồi thử lại.','api_429');
+throw err((j.error&&j.error.message)||('Lỗi HTTP '+r.status),'api_'+r.status)}}
 sample.limits=async function(){return{images:true}};
 window.claude={use:async function(n){if(n==='sample')return sample;throw new Error('unavailable')}};
 if('serviceWorker' in navigator)navigator.serviceWorker.register('sw.js').catch(function(){});})();
@@ -331,15 +344,17 @@ render();
 </script>
 <script>(function(){var e=document.getElementById('splash');try{if(sessionStorage.getItem('splash')){e.remove();return}sessionStorage.setItem('splash','1')}catch(x){}setTimeout(function(){e.style.opacity=0;setTimeout(function(){e.remove()},650)},1300)})();</script>
 <script>
-(function(){var K='tp_cfg',get=function(){try{return JSON.parse(localStorage.getItem(K))||{}}catch(e){return{}}};
+(function(){var K='tp_cfg',get=function(){try{return JSON.parse(localStorage.getItem(K))||{}}catch(e){return{}}},DM={gemini:'gemini-2.5-flash',anthropic:'claude-sonnet-4-6'};
 var b=document.createElement('button');b.className='chip';b.textContent='⚙️';b.title='Cài đặt';b.style.cssText='margin-left:auto;cursor:pointer;color:inherit;font:inherit;font-size:18px';document.querySelector('.brand').appendChild(b);
-b.onclick=function(){var c=get(),o=document.createElement('div');o.className='ov';
-o.innerHTML="<div class='card ovc'><b>⚙️ Cài đặt</b><label class='mu'>API key Anthropic (chỉ lưu trên máy này)</label><input class='in' id='ck' type='password' placeholder='sk-ant-…' value='"+ea(c.key||'')+"'><label class='mu'>Model</label><input class='in' id='cm' value='"+ea(c.model||'claude-sonnet-4-6')+"'><div class='row'><button class='btn pri' id='cs'>Lưu</button><button class='btn' id='cx'>Đóng</button></div><hr style='border-color:var(--bd);margin:14px 0'><b>Sao lưu / chuyển máy</b><p class='mu'>Xuất file rồi nhập vào máy khác. Nhập sẽ gộp với dữ liệu đang có.</p><div class='row'><button class='btn' id='ce'>⬇️ Xuất dữ liệu</button><label class='btn'>⬆️ Nhập dữ liệu<input id='ci' type='file' accept='.json' hidden></label></div><p class='mu' id='cmsg'></p></div>";
-document.body.appendChild(o);var m=function(t){o.querySelector('#cmsg').textContent=t};
-o.querySelector('#cx').onclick=function(){o.remove()};
-o.querySelector('#cs').onclick=function(){localStorage.setItem(K,JSON.stringify({key:o.querySelector('#ck').value.trim(),model:o.querySelector('#cm').value.trim()||'claude-sonnet-4-6'}));m('Đã lưu.')};
-o.querySelector('#ce').onclick=function(){var a=document.createElement('a');a.href=URL.createObjectURL(new Blob([JSON.stringify(docs())],{type:'application/json'}));a.download='thephong-backup-'+new Date().toISOString().slice(0,10)+'.json';a.click();m('Đã xuất file.')};
-o.querySelector('#ci').onchange=function(e){var f=e.target.files[0];if(!f)return;var r=new FileReader();r.onload=function(){try{var d=JSON.parse(r.result);merge({docs:Object.keys(d).map(function(id){return{id:id,data:function(){return d[id]}}})});save();render();m('Đã nhập và gộp dữ liệu.')}catch(x){m('File không hợp lệ.')}};r.readAsText(f)}}})();
+b.onclick=function(){var c=get(),pv=c.prov||'gemini',o=document.createElement('div');o.className='ov';
+o.innerHTML="<div class='card ovc'><b>⚙️ Cài đặt AI</b><label class='mu'>Nhà cung cấp</label><select class='in' id='cp'><option value='gemini'"+(pv==='gemini'?' selected':'')+">Google Gemini (có gói miễn phí)</option><option value='anthropic'"+(pv==='anthropic'?' selected':'')+">Anthropic Claude (trả phí)</option></select><label class='mu'>API key (chỉ lưu trên máy này)</label><input class='in' id='ck' type='password' placeholder='AIza… hoặc sk-ant-…' value='"+ea(c.key||'')+"'><p class='mu' id='chint'></p><label class='mu'>Model</label><input class='in' id='cm' value='"+ea(c.model||DM[pv])+"'><div class='row'><button class='btn pri' id='cs'>Lưu</button><button class='btn' id='cx'>Đóng</button></div><hr style='border-color:var(--bd);margin:14px 0'><b>Sao lưu / chuyển máy</b><p class='mu'>Xuất file rồi nhập vào máy khác. Nhập sẽ gộp với dữ liệu đang có.</p><div class='row'><button class='btn' id='ce'>⬇️ Xuất dữ liệu</button><label class='btn'>⬆️ Nhập dữ liệu<input id='ci' type='file' accept='.json' hidden></label></div><p class='mu' id='cmsg'></p></div>";
+document.body.appendChild(o);var q=function(x){return o.querySelector(x)},m=function(t){q('#cmsg').textContent=t};
+var hint=function(){q('#chint').innerHTML=q('#cp').value==='gemini'?"Lấy key miễn phí: <a href='https://aistudio.google.com/app/apikey' target='_blank' rel='noopener' style='color:var(--ac)'>aistudio.google.com/app/apikey</a> (đăng nhập Google → Create API key).":"Lấy key tại console.anthropic.com (cần nạp tiền)."};hint();
+q('#cp').onchange=function(){var v=q('#cp').value;if(q('#cm').value===DM.gemini||q('#cm').value===DM.anthropic)q('#cm').value=DM[v];hint()};
+q('#cx').onclick=function(){o.remove()};
+q('#cs').onclick=function(){var v=q('#cp').value;localStorage.setItem(K,JSON.stringify({prov:v,key:q('#ck').value.trim(),model:q('#cm').value.trim()||DM[v]}));m('Đã lưu.')};
+q('#ce').onclick=function(){var a=document.createElement('a');a.href=URL.createObjectURL(new Blob([JSON.stringify(docs())],{type:'application/json'}));a.download='thephong-backup-'+new Date().toISOString().slice(0,10)+'.json';a.click();m('Đã xuất file.')};
+q('#ci').onchange=function(e){var f=e.target.files[0];if(!f)return;var r=new FileReader();r.onload=function(){try{var d=JSON.parse(r.result);merge({docs:Object.keys(d).map(function(id){return{id:id,data:function(){return d[id]}}})});save();render();m('Đã nhập và gộp dữ liệu.')}catch(x){m('File không hợp lệ.')}};r.readAsText(f)}}})();
 </script>
 </body>
 </html>
