@@ -26,6 +26,48 @@ sample.limits=async function(){return{images:true}};
 window.claude={use:async function(n){if(n==='sample')return sample;throw new Error('unavailable')}};
 if('serviceWorker' in navigator)navigator.serviceWorker.register('sw.js').catch(function(){});})();
 </script>
+<script src="config.js"></script>
+<script>
+window.__KEY=localStorage.getItem('tp_uid')?'tp_data_'+localStorage.getItem('tp_uid'):'toeic_fc_v1';
+var FB=window.TP_FIREBASE||{},fbOK=!!(FB.apiKey&&FB.projectId);
+function authed(){return !!localStorage.getItem('tp_auth')&&!!localStorage.getItem('tp_uid')}
+function idb(){return new Promise(function(res,rej){var r=indexedDB.open('tp_db',1);r.onupgradeneeded=function(){r.result.createObjectStore('kv')};r.onsuccess=function(){res(r.result)};r.onerror=function(){rej(r.error)}})}
+function idbGet(k){return idb().then(function(db){return new Promise(function(res,rej){var t=db.transaction('kv').objectStore('kv').get(k);t.onsuccess=function(){res(t.result)};t.onerror=function(){rej(t.error)}})})}
+function idbSet(k,v){return idb().then(function(db){return new Promise(function(res,rej){var t=db.transaction('kv','readwrite');t.objectStore('kv').put(v,k);t.oncomplete=res;t.onerror=function(){rej(t.error)}})})}
+function idbDel(k){return idb().then(function(db){return new Promise(function(res,rej){var t=db.transaction('kv','readwrite');t.objectStore('kv').delete(k);t.oncomplete=res;t.onerror=function(){rej(t.error)}})})}
+function warn(t){var b=document.getElementById('warnb');if(!b){b=document.createElement('div');b.id='warnb';b.style.cssText='position:fixed;left:0;right:0;top:0;z-index:70;background:#d64545;color:#fff;padding:10px 14px;font-size:14px;text-align:center;cursor:pointer';b.onclick=function(){b.remove()};document.body.appendChild(b)}b.textContent=t}
+var pT=null;
+async function flush(){try{await idbSet(window.__KEY,JSON.parse(JSON.stringify(S)));try{localStorage.removeItem(window.__KEY)}catch(e){}}catch(e){try{localStorage.setItem(window.__KEY,JSON.stringify(S))}catch(e2){warn('⚠️ Không lưu được dữ liệu (bộ nhớ đầy). Hãy bấm ⚙️ → Xuất dữ liệu để sao lưu ngay. Chạm để ẩn.')}}}
+function persist(){clearTimeout(pT);pT=setTimeout(flush,300)}
+document.addEventListener('visibilitychange',function(){try{if(document.hidden){clearTimeout(pT);flush()}}catch(e){}});
+function viErr(m){m=String(m||'');var t={EMAIL_EXISTS:'Email này đã được đăng ký.',INVALID_EMAIL:'Email không hợp lệ.',INVALID_LOGIN_CREDENTIALS:'Sai email hoặc mật khẩu.',EMAIL_NOT_FOUND:'Không có tài khoản với email này.',INVALID_PASSWORD:'Sai mật khẩu.',MISSING_PASSWORD:'Chưa nhập mật khẩu.',OPERATION_NOT_ALLOWED:'Chưa bật đăng nhập Email/Password trong Firebase.',CONFIGURATION_NOT_FOUND:'Chưa bật Authentication trong Firebase.',USER_DISABLED:'Tài khoản đã bị khoá.',API_KEY_INVALID:'apiKey trong config.js không đúng.'};for(var k in t)if(m.indexOf(k)>=0)return t[k];if(m.indexOf('WEAK_PASSWORD')>=0)return 'Mật khẩu cần ít nhất 6 ký tự.';if(m.indexOf('TOO_MANY')>=0)return 'Thử quá nhiều lần, chờ vài phút rồi thử lại.';return 'Lỗi: '+m}
+async function authCall(ep,body){var r=await fetch('https://identitytoolkit.googleapis.com/v1/accounts:'+ep+'?key='+encodeURIComponent(FB.apiKey),{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)});var j=await r.json().catch(function(){return{}});if(!r.ok)throw new Error(viErr(j.error&&j.error.message));return j}
+async function token(){var a=JSON.parse(localStorage.getItem('tp_auth')||'null');if(!a)throw new Error('Chưa đăng nhập');if(a.exp-60000>Date.now())return a.idToken;
+var r=await fetch('https://securetoken.googleapis.com/v1/token?key='+encodeURIComponent(FB.apiKey),{method:'POST',headers:{'content-type':'application/x-www-form-urlencoded'},body:'grant_type=refresh_token&refresh_token='+encodeURIComponent(a.refreshToken)});var j=await r.json().catch(function(){return{}});
+if(!r.ok)throw new Error('Phiên đăng nhập hết hạn, hãy đăng nhập lại.');a.idToken=j.id_token;a.refreshToken=j.refresh_token;a.exp=Date.now()+(+j.expires_in)*1000;localStorage.setItem('tp_auth',JSON.stringify(a));return a.idToken}
+async function fsReq(m,path,body){var t=await token();var r=await fetch('https://firestore.googleapis.com/v1/projects/'+encodeURIComponent(FB.projectId)+'/databases/(default)/documents'+path,{method:m,headers:{'content-type':'application/json',authorization:'Bearer '+t},body:body?JSON.stringify(body):undefined});var j=await r.json().catch(function(){return{}});if(!r.ok)throw new Error((j.error&&j.error.message)||('HTTP '+r.status));return j}
+function makeDB(uid){return{doc:function(p){var id=p.split('/').pop();return{set:async function(o){await fsReq('PATCH','/users/'+uid+'/docs/'+encodeURIComponent(id)+'?updateMask.fieldPaths=json',{fields:{json:{stringValue:JSON.stringify(o)}}})}}},
+collection:function(){return{get:async function(){var docs=[],pt='';do{var j=await fsReq('GET','/users/'+uid+'/docs?pageSize=100'+(pt?'&pageToken='+encodeURIComponent(pt):''));(j.documents||[]).forEach(function(d){docs.push({id:decodeURIComponent(d.name.split('/').pop()),data:function(){try{return JSON.parse(d.fields.json.stringValue)}catch(e){return null}}})});pt=j.nextPageToken||''}while(pt);return{docs:docs}}}}}}
+(function(){var old=window.claude.use;window.claude.use=async function(n){if(n==='db'){if(!(fbOK&&authed()))throw new Error('guest');return makeDB(localStorage.getItem('tp_uid'))}if(n==='user'){if(!authed())throw new Error('guest');return{id:async function(){return localStorage.getItem('tp_uid')}}}return old(n)}})();
+async function finishLogin(j){var uid=j.localId;localStorage.setItem('tp_auth',JSON.stringify({email:j.email,uid:uid,idToken:j.idToken,refreshToken:j.refreshToken,exp:Date.now()+(+j.expiresIn)*1000}));
+var ak='tp_data_'+uid,have=null;try{have=await idbGet(ak)}catch(e){}
+if(!have){var g=null;try{g=await idbGet('toeic_fc_v1')}catch(e){}if(!g){try{var r=localStorage.getItem('toeic_fc_v1');if(r)g=JSON.parse(r)}catch(e){}}
+if(g&&g.days&&g.days.length){var n=g.days.reduce(function(a,d){return a+d.words.length},0);if(confirm('Máy này đang có '+n+' từ chưa gắn tài khoản. Gộp vào tài khoản này?'))try{await idbSet(ak,g)}catch(e){}}}
+localStorage.setItem('tp_uid',uid);localStorage.removeItem('tp_guest');location.reload()}
+function showGate(){var o=document.createElement('div');o.id='gate';o.style.cssText='position:fixed;inset:0;z-index:60;background:linear-gradient(160deg,#1b1464,#0f0c29 55%,#24243e);display:flex;align-items:center;justify-content:center;padding:16px;overflow:auto';
+o.innerHTML="<div class='card' style='width:100%;max-width:380px'><div style='text-align:center'><img src='icon-192.png' alt='' style='width:76px;height:76px;border-radius:50%;box-shadow:0 0 22px #8b4fe0aa'><h1 style='margin:8px 0 2px'>Thế Phong TOEIC</h1><p class='mu' style='margin:0 0 12px'>Đăng nhập để đồng bộ kho từ giữa các thiết bị</p></div><input class='in' id='ge' type='email' placeholder='Email' autocomplete='username'><input class='in' id='gp' type='password' placeholder='Mật khẩu (từ 6 ký tự)' autocomplete='current-password'><div class='row' style='margin-top:6px'><button class='btn pri' id='gi' style='flex:1'>Đăng nhập</button><button class='btn' id='gu' style='flex:1'>Đăng ký</button></div><p class='mu' id='gm' style='min-height:20px'></p><div class='row' style='justify-content:space-between'><button class='btn' id='gf'>Quên mật khẩu</button><button class='btn' id='gg'>Dùng không tài khoản</button></div></div>";
+document.body.appendChild(o);var q=function(x){return o.querySelector(x)},m=function(t){q('#gm').textContent=t};
+async function go(kind){var e=q('#ge').value.trim(),pw=q('#gp').value;if(!e||!pw)return m('Nhập email và mật khẩu.');m('Đang xử lý…');try{await finishLogin(await authCall(kind==='up'?'signUp':'signInWithPassword',{email:e,password:pw,returnSecureToken:true}))}catch(x){m(x.message)}}
+q('#gi').onclick=function(){go('in')};q('#gu').onclick=function(){go('up')};
+q('#gf').onclick=async function(){var e=q('#ge').value.trim();if(!e)return m('Nhập email trước.');try{await authCall('sendOobCode',{requestType:'PASSWORD_RESET',email:e});m('Đã gửi email đặt lại mật khẩu (xem cả hộp thư rác).')}catch(x){m(x.message)}};
+q('#gg').onclick=function(){localStorage.setItem('tp_guest','1');o.remove();runApp()}}
+function runApp(){document.querySelectorAll('script[type="text/app"]').forEach(function(el){var s=document.createElement('script');s.textContent=el.textContent;document.body.appendChild(s);s.remove()})}
+async function boot(){var S0=null;try{S0=await idbGet(window.__KEY)}catch(e){}
+if(!S0){try{var r=localStorage.getItem(window.__KEY);if(r)S0=JSON.parse(r)}catch(e){}}
+window.__boot={S:S0};try{if(navigator.storage&&navigator.storage.persist)navigator.storage.persist()}catch(e){}
+if(fbOK&&!authed()&&!localStorage.getItem('tp_guest')){showGate();return}runApp()}
+if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',boot);else boot();
+</script>
 
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
@@ -101,11 +143,11 @@ nav button.on{background:linear-gradient(90deg,#6f5bff,#d85fb0);border:0}
 <nav id="nav"></nav>
 <div id="v"></div>
 </main>
-<script>
-const KEY="toeic_fc_v1",INT=[0,1,3,7,14,30];let syncSt="⏳";
+<script type="text/app">
+const KEY=window.__KEY,INT=[0,1,3,7,14,30];let syncSt="⏳";
 let S={days:[],prog:{}},tab="add",draft=null,files=[],busy="",q=[],qi=0,flip=false,mode="",selDay=0,sampleP=null;
-try{const r=localStorage.getItem(KEY);if(r)S=JSON.parse(r)}catch(e){}
-const save=()=>{try{localStorage.setItem(KEY,JSON.stringify(S))}catch(e){}if(window.schedPush)schedPush()};
+if(window.__boot&&window.__boot.S)S=window.__boot.S;S.days=S.days||[];S.prog=S.prog||{};
+const save=()=>{persist();if(window.schedPush)schedPush()};
 const $=s=>document.querySelector(s);
 const esc=t=>String(t==null?"":t).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 const key=w=>w.word.toLowerCase().trim();
@@ -128,7 +170,7 @@ $("#v").innerHTML=`<div class="card"><b>Gửi ảnh chứa từ vựng</b><p cla
 <div class="card"><b>✨ Để mình chọn từ cho bạn</b><p class="mu">Chọn cấp độ, chủ đề và số lượng. App gợi ý từ mới (không trùng từ bạn đã có) rồi tạo flashcard. Ngày lưu lấy theo ô “Lưu vào ngày” ở trên.</p><div class="lvs">${["A1","A2","B1","B2","C1","C2"].map(l=>`<label class="tag"><input type="checkbox" class="lv" value="${l}" ${l==="B1"||l==="B2"?"checked":""}> ${l}</label>`).join("")}</div><div class="row" style="margin-top:10px"><select id="tp"><option value="random">🎲 Ngẫu nhiên</option>${["Văn phòng","Tuyển dụng & nhân sự","Họp & email","Du lịch & khách sạn","Mua sắm & dịch vụ","Tài chính & ngân hàng","Sản xuất & kho vận","Y tế","Công nghệ","Đời sống hằng ngày"].map(t=>`<option>${esc(t)}</option>`).join("")}</select><span>Số từ</span><input id="cn" type="number" min="1" max="40" value="10" style="width:80px"><button class="btn pri" id="au">Gợi ý từ</button></div></div>${(()=>{const n=S.days.flatMap(d=>d.words).filter(c=>!c.desc||!c.svg).length;return n?`<div class="card"><b>🔄 Nâng cấp thẻ cũ</b><p class="mu">${n} thẻ chưa có mô tả, hình minh hoạ hoặc phân tích ngữ pháp. Bấm để app tạo bổ sung (giữ nguyên các thông tin cũ).</p><button class="btn pri" id="up">Nâng cấp ${n} thẻ</button></div>`:""})()}<div id="pv"></div>`;
 const th=()=>{$("#th").innerHTML="";files.forEach(f=>{const i=document.createElement("img");i.src=URL.createObjectURL(f);$("#th").appendChild(i)})};th();
 $("#f").onchange=e=>{files=[...e.target.files];th()};
-$("#go").onclick=gen;$("#au").onclick=auto;if($("#up"))$("#up").onclick=upgrade;if(draft)pv()}
+$("#go").onclick=gen;$("#au").onclick=()=>auto();if($("#up"))$("#up").onclick=()=>upgrade();if(draft)pv()}
 async function gen(){
 const msg=t=>{busy=t;const m=$("#msg");if(m)m.textContent=t};
 const txt=$("#tx").value.trim();if(!files.length&&!txt&&!window.forced)return msg("Hãy chọn ảnh hoặc nhập từ trước.");
@@ -182,7 +224,7 @@ S.days.map(d=>`<div class="card"><b>Ngày ${d.day}</b> <span class="mu">(${d.wor
 `<p class="mu">Dữ liệu lưu trong trình duyệt của thiết bị này, không tự đồng bộ giữa điện thoại và laptop.</p>`}
 render();
 </script>
-<script>
+<script type="text/app">
 let combo=0,ok0=0,best=0;
 const today=()=>new Date().toDateString(),rx=s=>s.replace(/[.*+?^${}()|[\]\\]/g,"\\$&");
 function hud(){const x=S.xp||0,g=(S.day&&S.day.d===today())?S.day.n:0;$("#hud").innerHTML=`<div class="hud"><span class="chip">🔥 ${S.streak||0}</span><button class="chip" data-go="read" title="Đọc bài song ngữ">📖</button><span class="chip">Lv ${Math.floor(x/100)+1}</span><div class="xp"><i style="width:${x%100}%"></i></div><span class="chip">🎯 ${Math.min(g,20)}/20</span><span class="chip" title="Đồng bộ">${syncSt}</span></div>`}
@@ -214,7 +256,7 @@ save();hud();qi++;flip=false;setTimeout(()=>vStudy(m),ok?380:80)};
 $("#y").onclick=()=>rate(true);$("#n").onclick=()=>rate(false)}
 render();
 </script>
-<script>
+<script type="text/app">
 let DB=null,UID=null,tm=null;const pushed={};
 function docs(){const o={meta:{xp:S.xp||0,streak:S.streak||0,last:S.last||"",day:S.day||null,prog:S.prog}};S.days.forEach(d=>o["day-"+d.day]={day:d.day,words:d.words});return o}
 async function push(){if(!DB||!UID)return;try{const o=docs();for(const id in o){const s=JSON.stringify(o[id]);if(pushed[id]===s)continue;await DB.doc(`data/users/${UID}/${id}`).set(JSON.parse(s));pushed[id]=s}syncSt="☁️"}catch(e){syncSt="⚠️"}hud()}
@@ -232,7 +274,7 @@ if(!DB){DB=await claude.use("db");const u=await claude.use("user");UID=u?await u
 if(!DB||!UID){syncSt="💾";hud();return}
 syncSt="⏳";hud();
 const ch=merge(await DB.collection(`data/users/${UID}`).get());
-if(ch)try{localStorage.setItem(KEY,JSON.stringify(S))}catch(e){}
+if(ch)persist();
 await push();
 if(ch&&(tab==="st"||(first&&!files.length&&!draft)))render();
 }catch(e){syncSt="💾";hud()}}
@@ -264,7 +306,7 @@ save()}
 msg("Xong! Đã nâng cấp "+need.length+" thẻ. Vào tab Học để xem.")}catch(e){msg("Lỗi: "+(e.message||e.code||"không rõ")+" (các thẻ đã xong vẫn được lưu)")}
 const b=$("#up");if(b)b.disabled=false}
 </script>
-<script>
+<script type="text/app">
 let qs='',delArm=null,rid=null,showVi=true,selT='',selC='';const AC={};
 S.reads=S.reads||[];S.del=S.del||{};
 const ea=s=>esc(s).replace(/'/g,'&#39;'),fmtD=t=>new Date(t).toLocaleString('vi-VN',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'});
@@ -343,17 +385,23 @@ document.addEventListener('selectionchange',()=>{const a=$('#art'),s=getSelectio
 render();
 </script>
 <script>(function(){var e=document.getElementById('splash');try{if(sessionStorage.getItem('splash')){e.remove();return}sessionStorage.setItem('splash','1')}catch(x){}setTimeout(function(){e.style.opacity=0;setTimeout(function(){e.remove()},650)},1300)})();</script>
-<script>
+<script type="text/app">
 (function(){var K='tp_cfg',get=function(){try{return JSON.parse(localStorage.getItem(K))||{}}catch(e){return{}}},DM={gemini:'gemini-2.5-flash',anthropic:'claude-sonnet-4-6'};
 var b=document.createElement('button');b.className='chip';b.textContent='⚙️';b.title='Cài đặt';b.style.cssText='margin-left:auto;cursor:pointer;color:inherit;font:inherit;font-size:18px';document.querySelector('.brand').appendChild(b);
+try{var lb=+localStorage.getItem('tp_lastbk')||0;if(!lb)localStorage.setItem('tp_lastbk',Date.now());else if(!authed()&&S.days.length&&Date.now()-lb>7*864e5)warn('📦 Đã hơn 7 ngày chưa sao lưu. Bấm ⚙️ → Xuất dữ liệu. Chạm để ẩn.')}catch(e){}
 b.onclick=function(){var c=get(),pv=c.prov||'gemini',o=document.createElement('div');o.className='ov';
-o.innerHTML="<div class='card ovc'><b>⚙️ Cài đặt AI</b><label class='mu'>Nhà cung cấp</label><select class='in' id='cp'><option value='gemini'"+(pv==='gemini'?' selected':'')+">Google Gemini (có gói miễn phí)</option><option value='anthropic'"+(pv==='anthropic'?' selected':'')+">Anthropic Claude (trả phí)</option></select><label class='mu'>API key (chỉ lưu trên máy này)</label><input class='in' id='ck' type='password' placeholder='AIza… hoặc sk-ant-…' value='"+ea(c.key||'')+"'><p class='mu' id='chint'></p><label class='mu'>Model</label><input class='in' id='cm' value='"+ea(c.model||DM[pv])+"'><div class='row'><button class='btn pri' id='cs'>Lưu</button><button class='btn' id='cx'>Đóng</button></div><hr style='border-color:var(--bd);margin:14px 0'><b>Sao lưu / chuyển máy</b><p class='mu'>Xuất file rồi nhập vào máy khác. Nhập sẽ gộp với dữ liệu đang có.</p><div class='row'><button class='btn' id='ce'>⬇️ Xuất dữ liệu</button><label class='btn'>⬆️ Nhập dữ liệu<input id='ci' type='file' accept='.json' hidden></label></div><p class='mu' id='cmsg'></p></div>";
+var acc=!fbOK?"<p class='mu'>Chưa cấu hình tài khoản (điền file config.js để bật đăng nhập).</p>":authed()?"<p class='mu'>Đang đăng nhập: <b>"+ea((JSON.parse(localStorage.getItem('tp_auth')||'{}')).email||'')+"</b><br>Dữ liệu tự đồng bộ giữa các thiết bị đăng nhập cùng tài khoản.</p><button class='btn' id='clo'>Đăng xuất</button>":"<p class='mu'>Đang dùng không tài khoản (dữ liệu chỉ nằm trên máy này).</p><button class='btn pri' id='cli'>Đăng nhập / Đăng ký</button>";
+o.innerHTML="<div class='card ovc'><b>👤 Tài khoản</b>"+acc+"<hr style='border-color:var(--bd);margin:14px 0'><b>⚙️ Cài đặt AI</b><label class='mu'>Nhà cung cấp</label><select class='in' id='cp'><option value='gemini'"+(pv==='gemini'?' selected':'')+">Google Gemini (có gói miễn phí)</option><option value='anthropic'"+(pv==='anthropic'?' selected':'')+">Anthropic Claude (trả phí)</option></select><label class='mu'>API key (chỉ lưu trên máy này, không đồng bộ)</label><input class='in' id='ck' type='password' placeholder='AIza… hoặc sk-ant-…' value='"+ea(c.key||'')+"'><p class='mu' id='chint'></p><label class='mu'>Model</label><input class='in' id='cm' value='"+ea(c.model||DM[pv])+"'><div class='row'><button class='btn pri' id='cs'>Lưu</button><button class='btn' id='cx'>Đóng</button></div><hr style='border-color:var(--bd);margin:14px 0'><b>💾 Bộ nhớ trên máy này</b><p class='mu' id='cst'>Đang kiểm tra…</p><div class='bar'><i id='cbar' style='width:0'></i></div><hr style='border-color:var(--bd);margin:14px 0'><b>Sao lưu / chuyển máy</b><p class='mu'>Xuất file rồi nhập vào máy khác. Nhập sẽ gộp với dữ liệu đang có.</p><div class='row'><button class='btn' id='ce'>⬇️ Xuất dữ liệu</button><label class='btn'>⬆️ Nhập dữ liệu<input id='ci' type='file' accept='.json' hidden></label></div><p class='mu' id='cmsg'></p></div>";
 document.body.appendChild(o);var q=function(x){return o.querySelector(x)},m=function(t){q('#cmsg').textContent=t};
-var hint=function(){q('#chint').innerHTML=q('#cp').value==='gemini'?"Lấy key miễn phí: <a href='https://aistudio.google.com/app/apikey' target='_blank' rel='noopener' style='color:var(--ac)'>aistudio.google.com/app/apikey</a> (đăng nhập Google → Create API key).":"Lấy key tại console.anthropic.com (cần nạp tiền)."};hint();
+var hint=function(){q('#chint').innerHTML=q('#cp').value==='gemini'?"Lấy key miễn phí: <a href='https://aistudio.google.com/app/apikey' target='_blank' rel='noopener' style='color:var(--ac)'>aistudio.google.com/app/apikey</a> (đăng nhập Google → Create API key).":"Lấy key tại console.anthropic.com (cần nạp tiền).";};hint();
 q('#cp').onchange=function(){var v=q('#cp').value;if(q('#cm').value===DM.gemini||q('#cm').value===DM.anthropic)q('#cm').value=DM[v];hint()};
 q('#cx').onclick=function(){o.remove()};
 q('#cs').onclick=function(){var v=q('#cp').value;localStorage.setItem(K,JSON.stringify({prov:v,key:q('#ck').value.trim(),model:q('#cm').value.trim()||DM[v]}));m('Đã lưu.')};
-q('#ce').onclick=function(){var a=document.createElement('a');a.href=URL.createObjectURL(new Blob([JSON.stringify(docs())],{type:'application/json'}));a.download='thephong-backup-'+new Date().toISOString().slice(0,10)+'.json';a.click();m('Đã xuất file.')};
+if(q('#cli'))q('#cli').onclick=function(){localStorage.removeItem('tp_guest');location.reload()};
+if(q('#clo'))q('#clo').onclick=async function(){try{await push()}catch(e){}if(syncSt!=='☁️'&&!confirm('Dữ liệu có thể chưa đồng bộ xong. Vẫn đăng xuất và xoá dữ liệu trên máy này?'))return;var uid=localStorage.getItem('tp_uid');try{await idbDel('tp_data_'+uid)}catch(e){}localStorage.removeItem('tp_data_'+uid);localStorage.removeItem('tp_auth');localStorage.removeItem('tp_uid');location.reload()};
+var n=S.days.reduce(function(a,d){return a+d.words.length},0);
+if(navigator.storage&&navigator.storage.estimate)navigator.storage.estimate().then(function(e){var mb=function(x){return (x/1048576).toFixed(1)};q('#cst').textContent=n+' từ · đã dùng '+mb(e.usage)+' MB / khoảng '+Math.round(e.quota/1048576)+' MB cho phép';q('#cbar').style.width=Math.max(1,Math.min(100,e.usage/e.quota*100))+'%';if(navigator.storage.persisted)navigator.storage.persisted().then(function(p){q('#cst').textContent+=p?' · đã được trình duyệt giữ bền':' · chưa được giữ bền (nên cài app lên máy)'})}).catch(function(){q('#cst').textContent=n+' từ'});else q('#cst').textContent=n+' từ';
+q('#ce').onclick=function(){var a=document.createElement('a');a.href=URL.createObjectURL(new Blob([JSON.stringify(docs())],{type:'application/json'}));a.download='thephong-backup-'+new Date().toISOString().slice(0,10)+'.json';a.click();localStorage.setItem('tp_lastbk',Date.now());m('Đã xuất file.')};
 q('#ci').onchange=function(e){var f=e.target.files[0];if(!f)return;var r=new FileReader();r.onload=function(){try{var d=JSON.parse(r.result);merge({docs:Object.keys(d).map(function(id){return{id:id,data:function(){return d[id]}}})});save();render();m('Đã nhập và gộp dữ liệu.')}catch(x){m('File không hợp lệ.')}};r.readAsText(f)}}})();
 </script>
 </body>
