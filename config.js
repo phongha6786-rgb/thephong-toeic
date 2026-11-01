@@ -1,6 +1,5 @@
-// Điền cấu hình Firebase của bạn vào đây để bật tài khoản + đồng bộ.
-// Để trống thì app chạy chế độ không tài khoản (dữ liệu chỉ nằm trên máy).
+// Cấu hình Firebase của project TOEIC (bật tài khoản + đồng bộ).
 window.TP_FIREBASE={
-  apiKey: "",
-  projectId: ""
+  apiKey: "AIzaSyAJOjcwNIeEFIrS0SJGANz6nOOLF1aJMRk",
+  projectId: "toeic-75869"
 };
