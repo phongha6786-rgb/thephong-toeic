@@ -2,16 +2,16 @@
 <html lang="vi">
 <head>
 <script>
-(function(){var K='tp_cfg',last=0;function cfg(){try{return JSON.parse(localStorage.getItem(K))||{}}catch(e){return{}}}
+(function(){var K='tp_cfg',last=0,nextT=0,noThink=false;function cfg(){try{return JSON.parse(localStorage.getItem(K))||{}}catch(e){return{}}}
 function sleep(ms){return new Promise(function(r){setTimeout(r,ms)})}
 function b64(b){return new Promise(function(r){var f=new FileReader();f.onload=function(){r(f.result.split(',')[1])};f.readAsDataURL(b)})}
 function err(m,c){var e=new Error(m);e.code=c;return e}
 async function sample(prompt,opts){opts=opts||{};var c=cfg();if(!c.key)throw err('Chưa nhập API key. Bấm ⚙️ ở góc trên để nhập.','no_key');
 var prov=c.prov||'gemini',imgs=[];for(var im of(opts.images||[]))imgs.push(await b64(im));
 var alt=false;for(var at=0;at<4;at++){var r,j;
-if(prov==='gemini'){var w=6500-(Date.now()-last);if(w>0)await sleep(w);last=Date.now();
+if(prov==='gemini'){var tt=Math.max(Date.now(),nextT);nextT=tt+3500;if(tt>Date.now())await sleep(tt-Date.now());
 var model=alt?'gemini-flash-latest':((c.model&&c.model!=='gemini-2.5-flash')?c.model:'gemini-3.8-flash'),parts=imgs.map(function(d){return{inline_data:{mime_type:'image/jpeg',data:d}}});parts.push({text:prompt});
-var gc={maxOutputTokens:8192,temperature:0.7,responseMimeType:'application/json'};if(/2\.5-flash/.test(model))gc.thinkingConfig={thinkingBudget:0};
+var gc={maxOutputTokens:8192,temperature:0.7,responseMimeType:'application/json'};if(/2\.5-flash/.test(model))gc.thinkingConfig={thinkingBudget:0};else if(!noThink)gc.thinkingConfig={thinkingLevel:'low'};
 r=await fetch('https://generativelanguage.googleapis.com/v1beta/models/'+encodeURIComponent(model)+':generateContent?key='+encodeURIComponent(c.key),{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({contents:[{role:'user',parts:parts}],generationConfig:gc})});
 j=await r.json().catch(function(){return{}});
 if(r.ok){var cd=(j.candidates||[])[0],t=cd&&cd.content&&cd.content.parts?cd.content.parts.map(function(x){return x.text||''}).join(''):'';if(!t)throw err('AI không trả về nội dung'+(cd&&cd.finishReason?' ('+cd.finishReason+')':'')+'. Thử lại nhé.','empty');return{text:t}}}
@@ -19,6 +19,7 @@ else{var content=imgs.map(function(d){return{type:'image',source:{type:'base64',
 r=await fetch('https://api.anthropic.com/v1/messages',{method:'POST',headers:{'content-type':'application/json','x-api-key':c.key,'anthropic-version':'2023-06-01','anthropic-dangerous-direct-browser-access':'true'},body:JSON.stringify({model:c.model||'claude-sonnet-4-6',max_tokens:6000,messages:[{role:'user',content:content}]})});
 j=await r.json().catch(function(){return{}});
 if(r.ok)return{text:(j.content||[]).map(function(x){return x.text||''}).join('')}}
+if(prov==='gemini'&&!r.ok&&gc.thinkingConfig&&!noThink&&/thinking/i.test(JSON.stringify(j))){noThink=true;continue}
 if(prov==='gemini'&&!r.ok&&!alt&&/no longer available|NOT_FOUND|not found/i.test(JSON.stringify(j))){alt=true;continue}
 if((r.status===429||r.status===503)&&at<3){await sleep(15000);continue}
 if(r.status===429)throw err('Đã hết lượt miễn phí (giới hạn theo phút hoặc theo ngày). Chờ vài phút hoặc đến ngày mai rồi thử lại.','api_429');
@@ -136,6 +137,11 @@ nav button.on{background:linear-gradient(90deg,#6f5bff,#d85fb0);border:0}
 #sbtn{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(16px + env(safe-area-inset-bottom,0px));z-index:16;box-shadow:0 8px 24px #0008}#art{padding-bottom:45vh}
 .hud .chip[data-go]{color:inherit;cursor:pointer;font:inherit;font-weight:600}
 .dtog{align-self:flex-start;background:rgba(255,255,255,.18);border:0;color:#fff;border-radius:99px;padding:6px 14px;font:inherit;font-size:14px;font-weight:600;cursor:pointer;margin:2px 0 6px}.dvi{margin:0 0 8px;padding:10px 12px;border-radius:12px;background:rgba(0,0,0,.28);font-size:15px;line-height:1.5}
+[hidden]{display:none!important}
+.lp{margin-top:26vh}.lpn{margin:10px 0 0;padding:6px 10px;border-radius:10px;background:rgba(255,209,102,.14);color:#ffd166;font-size:13px}
+.fw{font-size:30px;font-weight:700;margin:6px 0 0}.front .tk{border-bottom:1px dotted rgba(255,255,255,.55)}
+.seg{display:flex;gap:4px;margin:6px 0 10px}.seg span{flex:1;height:10px;border-radius:5px;background:rgba(255,255,255,.1);overflow:hidden}.seg i{display:block;height:100%;background:linear-gradient(90deg,#3ddc97,#5ad1ff)}
+.rw{background:rgba(255,107,139,.12);border-radius:8px;padding:6px 8px}.no{color:var(--no)}.hud{flex-wrap:wrap;row-gap:6px}.xp{min-width:60px}
 </style>
 </head>
 <body>
@@ -165,13 +171,13 @@ function shrink(f){return new Promise(res=>{const im=new Image();im.onload=()=>{
 function parseJ(t){const m=String(t).match(/\[[\s\S]*\]/);if(!m)throw new Error("Không đọc được kết quả");return JSON.parse(m[0])}
 function vAdd(){
 const next=(S.days.length?Math.max(...S.days.map(d=>d.day)):0)+1;
-$("#v").innerHTML=`<div class="card"><b>Gửi ảnh chứa từ vựng</b><p class="mu">Chọn 1 hoặc nhiều ảnh (chụp sách, bảng, danh sách từ…). App sẽ đọc các từ tiếng Anh và tạo flashcard đầy đủ IPA, từ loại, CEFR, nghĩa, ngữ cảnh, ví dụ, collocations.</p>
+$("#v").innerHTML=`<div class="card"><b>Gửi ảnh chứa từ vựng</b><p class="mu">Chọn 1 hoặc nhiều ảnh (chụp sách, bảng, danh sách từ…). App sẽ đọc các từ tiếng Anh và tạo flashcard đầy đủ IPA, từ loại, CEFR, nghĩa, cụm từ hữu ích, ví dụ.</p>
 <div class="row"><label class="btn">Chọn ảnh<input id="f" type="file" accept="image/*" multiple hidden></label><span class="mu">hoặc dán chữ bên dưới</span></div>
 <div class="thumbs" id="th" style="margin:10px 0"></div>
 <textarea id="tx" placeholder="Hoặc gõ/dán danh sách từ, mỗi từ một dòng"></textarea>
 <div class="row" style="margin-top:10px"><span>Lưu vào ngày</span><input id="dn" type="number" min="1" value="${next}" style="width:80px"><button class="btn pri" id="go">Tạo flashcard</button></div>
 <p class="mu" id="msg">${esc(busy)}</p></div>
-<div class="card"><b>✨ Để mình chọn từ cho bạn</b><p class="mu">Chọn cấp độ, chủ đề và số lượng. App gợi ý từ mới (không trùng từ bạn đã có) rồi tạo flashcard. Ngày lưu lấy theo ô “Lưu vào ngày” ở trên.</p><div class="lvs">${["A1","A2","B1","B2","C1","C2"].map(l=>`<label class="tag"><input type="checkbox" class="lv" value="${l}" ${l==="B1"||l==="B2"?"checked":""}> ${l}</label>`).join("")}</div><div class="row" style="margin-top:10px"><select id="tp"><option value="random">🎲 Ngẫu nhiên</option>${topicOpts(false)}</select><span>Số từ</span><input id="cn" type="number" min="1" max="40" value="10" style="width:80px"><button class="btn pri" id="au">Gợi ý từ</button></div></div>${(()=>{const n=S.days.flatMap(d=>d.words).filter(c=>!c.desc||!c.gram||!c.descVi).length;return n?`<div class="card"><b>🔄 Nâng cấp thẻ cũ</b><p class="mu">${n} thẻ chưa có mô tả, bản dịch hoặc phân tích ngữ pháp. Bấm để app tạo bổ sung (giữ nguyên các thông tin cũ).</p><button class="btn pri" id="up">Nâng cấp ${n} thẻ</button></div>`:""})()}<div id="pv"></div>`;
+<div class="card"><b>✨ Để mình chọn từ cho bạn</b><p class="mu">Chọn cấp độ, chủ đề và số lượng. App gợi ý từ mới (không trùng từ bạn đã có) rồi tạo flashcard. Ngày lưu lấy theo ô “Lưu vào ngày” ở trên.</p><div class="lvs">${["A1","A2","B1","B2","C1","C2"].map(l=>`<label class="tag"><input type="checkbox" class="lv" value="${l}" ${l==="B1"||l==="B2"?"checked":""}> ${l}</label>`).join("")}</div><div class="row" style="margin-top:10px"><select id="tp"><option value="random">🎲 Ngẫu nhiên</option>${topicOpts(false)}</select><span>Số từ</span><input id="cn" type="number" min="1" max="40" value="10" style="width:80px"><button class="btn pri" id="au">Gợi ý từ</button></div></div>${(()=>{const n=S.days.flatMap(d=>d.words).filter(c=>!c.desc||!c.gram||!c.descVi||!c.phr||c.min).length;return n?`<div class="card"><b>🔄 Nâng cấp thẻ cũ</b><p class="mu">${n} thẻ chưa có mô tả, bản dịch hoặc phân tích ngữ pháp. Bấm để app tạo bổ sung (giữ nguyên các thông tin cũ).</p><button class="btn pri" id="up">Nâng cấp ${n} thẻ</button></div>`:""})()}<div id="pv"></div>`;
 const th=()=>{$("#th").innerHTML="";files.forEach(f=>{const i=document.createElement("img");i.src=URL.createObjectURL(f);$("#th").appendChild(i)})};th();
 $("#f").onchange=e=>{files=[...e.target.files];th()};
 $("#go").onclick=gen;$("#au").onclick=()=>auto();if($("#up"))$("#up").onclick=()=>upgrade();if(draft)pv()}
@@ -301,7 +307,7 @@ function pic(c){if(c.svg){try{let s=String(c.svg).trim().replace(/<script[\s\S]*
 const VP=ch=>`For these English words: ${JSON.stringify(ch)}. Return ONLY a JSON array (no markdown), one object per word, keys: word (exactly as given), desc (a short English paragraph of 2-3 sentences describing the word's meaning through a natural scene or situation, WITHOUT using the word or its derivatives; use real varied grammar such as tenses, relative clauses, conditionals, passives), descVi (a natural Vietnamese translation of desc), gram (array of 2-3 objects {s: exact phrase copied from desc, why: detailed Vietnamese explanation of why this grammar structure is used there: which tense/structure, its form, and what it expresses}).`;
 async function upgrade(){const msg=t=>{busy=t;const m=$("#msg");if(m)m.textContent=t};
 const sample=await getSample();if(!sample)return msg("Tính năng AI chưa sẵn sàng. Hãy mở app trong claude.ai và cho phép.");
-const all=S.days.flatMap(d=>d.words),need=all.filter(c=>!c.desc||!c.gram||!c.descVi);if(!need.length)return msg("Tất cả thẻ đã đầy đủ.");
+const all=S.days.flatMap(d=>d.words),need=all.filter(c=>!c.desc||!c.gram||!c.descVi||!c.phr||c.min);if(!need.length)return msg("Tất cả thẻ đã đầy đủ.");
 $("#up").disabled=true;$("#msg").scrollIntoView({behavior:"smooth",block:"center"});
 try{for(let i=0;i<need.length;i+=5){msg(`Đang nâng cấp thẻ ${Math.min(i+5,need.length)}/${need.length}…`);
 const r=await sample(VP(need.slice(i,i+5).map(c=>c.word)),{modelTier:"default",cache:false});
@@ -329,7 +335,7 @@ for(const k in(r.del||{}))if(r.del[k]>(S.del[k]||0)){S.del[k]=r.del[k];ch=true}}
 const gone=(k,u)=>(S.del[k]||0)>(u||0);
 for(const x of L){const r=x.r;
 if(x.id.startsWith('day-')){let D=S.days.find(y=>y.day===r.day);if(!D){D={day:r.day,words:[]};S.days.push(D);ch=true}
-for(const w of r.words||[]){if(gone('w:'+key(w),w.u))continue;const e=D.words.find(y=>key(y)===key(w));if(!e){D.words.push(w);ch=true}else if((w.u||0)>(e.u||0)){Object.assign(e,w);ch=true}else['emo','svg','desc','descVi','gram'].forEach(k=>{if(w[k]&&!e[k]){e[k]=w[k];ch=true}})}}
+for(const w of r.words||[]){if(gone('w:'+key(w),w.u))continue;const e=D.words.find(y=>key(y)===key(w));if(!e){D.words.push(w);ch=true}else if((w.u||0)>(e.u||0)){Object.assign(e,w);ch=true}else['desc','descVi','gram','phr'].forEach(k=>{if(w[k]&&!e[k]){e[k]=w[k];ch=true}})}}
 else if(x.id.startsWith('read-')){if(!gone('r:'+r.id,r.date)&&!S.reads.find(a=>a.id===r.id)){S.reads.push(r);ch=true}}}
 S.days.forEach(D=>{const n=D.words.length;D.words=D.words.filter(w=>!gone('w:'+key(w),w.u));if(D.words.length!==n)ch=true});
 const n=S.reads.length;S.reads=S.reads.filter(a=>!gone('r:'+a.id,a.date));if(n!==S.reads.length)ch=true;
@@ -358,25 +364,25 @@ save();o.remove();vStats()}}
 /* ===== Đọc bài song ngữ ===== */
 function vRead(){const a=S.reads.find(x=>x.id===rid);if(a)return vArt(a);
 const opt=l=>l.map(x=>`<option>${x}</option>`).join('');
-$('#v').innerHTML=`<div class='card'><b>📖 Tạo bài đọc song ngữ</b><div class='row' style='margin:8px 0'><select id='rm'><option value='ai'>AI viết bài theo trình độ</option><option value='paste'>Dán bài, transcript hoặc link</option></select></div><div id='rai'><div class='row'><select id='rl'>${opt(['A2','B1','B2','C1'])}</select><select id='rt'>${opt(['Email công sở','Thông báo','Bài báo kinh doanh','Quảng cáo','Bài luận','Hội thoại họp','Bài du lịch'])}</select><select id='rz'><option value='150'>Ngắn (~150 từ)</option><option value='300'>Vừa (~300 từ)</option></select></div><select class='in' id='rtp' style='margin-top:8px'><option value='random'>🎲 Chủ đề ngẫu nhiên</option>${topicOpts(true)}</select><input class='in' id='rp' placeholder='Hoặc tự nhập chủ đề riêng, ví dụ: remote work (ưu tiên hơn danh sách)'></div><div id='rpa' hidden><input class='in' id='rk' placeholder='Link nguồn (bài báo, YouTube…) để lưu nguồn'><textarea id='rx' placeholder='Dán nội dung bài hoặc transcript YouTube vào đây'></textarea><p class='mu'>App không tự mở được link. Hãy mở bài, copy nội dung (YouTube: ⋯ → Hiện bản chép lời) rồi dán vào ô này. Link chỉ dùng để ghi nhớ nguồn.</p></div><button class='btn pri' id='rg' style='margin-top:10px'>Tạo bài song ngữ</button><p class='mu' id='rmsg'></p></div>`+
+$('#v').innerHTML=`<div class='card'><b>📖 Tạo bài đọc song ngữ</b><div class='row' style='margin:8px 0'><select id='rm'><option value='ai'>AI viết bài theo trình độ</option><option value='paste'>Dán bài, transcript hoặc link</option></select></div><div id='rai'><div class='row'><select id='rl'>${opt(['A2','B1','B2','C1'])}</select><select id='rt'>${opt(['Bài báo','Email','Thông báo','Quảng cáo','Bài luận','Hội thoại','Câu chuyện ngắn'])}</select><select id='rz'><option value='150'>Ngắn (~150 từ)</option><option value='300'>Vừa (~300 từ)</option></select></div><select class='in' id='rtp' style='margin-top:8px'><option value='random'>🎲 Chủ đề ngẫu nhiên</option>${topicOpts(true)}<option value='__custom'>✏️ Tự nhập chủ đề…</option></select><input class='in' id='rp' hidden placeholder='Gõ chủ đề của bạn, ví dụ: remote work'></div><div id='rpa' hidden><input class='in' id='rk' placeholder='Link nguồn (bài báo, YouTube…) để lưu nguồn'><textarea id='rx' placeholder='Dán nội dung bài hoặc transcript YouTube vào đây'></textarea><p class='mu'>App không tự mở được link. Hãy mở bài, copy nội dung (YouTube: ⋯ → Hiện bản chép lời) rồi dán vào ô này. Link chỉ dùng để ghi nhớ nguồn.</p></div><button class='btn pri' id='rg' style='margin-top:10px'>Tạo bài song ngữ</button><p class='mu' id='rmsg'></p></div>`+
 [...S.reads].sort((a,b)=>b.date-a.date).map(a=>`<div class='card'><div class='row' style='justify-content:space-between;flex-wrap:nowrap'><div><b>${esc(a.title)}</b><br><span class='mu'>${fmtD(a.date)} · ${esc(a.level)} · ${esc(a.kind)}${a.src?' · 🔗':''}</span></div><div class='row' style='flex-wrap:nowrap'><button class='btn' data-o='${ea(a.id)}'>Đọc</button><button class='btn' data-d='${ea(a.id)}'>${delArm==='r:'+a.id?'Xoá?':'🗑'}</button></div></div></div>`).join('');
-$('#rm').onchange=e=>{$('#rai').hidden=e.target.value!=='ai';$('#rpa').hidden=e.target.value==='ai'};$('#rg').onclick=rgen;
+$('#rm').onchange=e=>{$('#rai').hidden=e.target.value!=='ai';$('#rpa').hidden=e.target.value==='ai'};$('#rg').onclick=rgen;$('#rtp').onchange=e=>{$('#rp').hidden=e.target.value!=='__custom'};
 $('#v').onclick=e=>{const b=e.target.closest('button');if(!b)return;if(b.dataset.o){rid=b.dataset.o;vRead()}else if(b.dataset.d){const k='r:'+b.dataset.d;if(delArm===k){S.reads=S.reads.filter(a=>a.id!==b.dataset.d);S.del[k]=Date.now();delArm=null;save();vRead()}else{delArm=k;vRead();setTimeout(()=>{if(delArm===k){delArm=null;if(tab==='read'&&!rid)vRead()}},3000)}}}}
 async function rgen(){const msg=t=>{const m=$('#rmsg');if(m)m.textContent=t};
 const sample=await getSample();if(!sample)return msg('Tính năng AI chưa sẵn sàng. Hãy mở app trong claude.ai và cho phép.');
-const mode=$('#rm').value,lv=$('#rl').value,type=$('#rt').value,size=$('#rz').value,topic=$('#rp').value.trim()||($('#rtp').value==='random'?'':$('#rtp').value),fmt='Return ONLY one JSON object (no markdown) with keys: title (English title), titleVi (Vietnamese title), level (estimated CEFR), paras (array of objects with keys en and vi, where vi is a faithful natural Vietnamese translation of en).';
+const mode=$('#rm').value,lv=$('#rl').value,type=$('#rt').value,size=$('#rz').value,topic=($('#rtp').value==='__custom'?$('#rp').value.trim():($('#rtp').value==='random'?'':$('#rtp').value)),fmt='Return ONLY one JSON object (no markdown) with keys: title (English title), titleVi (Vietnamese title), level (estimated CEFR), paras (array of objects with keys en and vi, where vi is a faithful natural Vietnamese translation of en).';
 let p;if(mode==='ai'){p=`Write an original ${size}-word ${type} in English at CEFR level ${lv}, suitable for TOEIC practice${topic?', topic: '+topic:''}. Use natural grammar appropriate to the level, with some variety of structures. Split it into 3-6 short paragraphs. ${fmt}`}
 else{const t=$('#rx').value.trim();if(!t)return msg('Hãy dán nội dung bài hoặc transcript (app không tự mở được link).');p=`Here is a text (an article or a video transcript). Lightly clean it (remove timestamps, fix obvious transcript errors), split into at most 8 paragraphs keeping the original wording, and translate each paragraph into Vietnamese. Estimate its CEFR level. ${fmt}\n\nTEXT:\n${t.slice(0,4500)}`;if(t.length>4500)msg('Bài dài nên mình chỉ lấy phần đầu (~4500 ký tự).')}
-$('#rg').disabled=true;if(mode==='ai'||t_ok())msg('Đang tạo bài song ngữ…');
+$('#rg').disabled=true;LP.start('Đang tạo bài song ngữ');LP.fake('Đang viết và dịch bài…');
 try{const r=await sample(p,{modelTier:'default',cache:false}),o=parseO(r.text),src=($('#rk')&&$('#rk').value.trim())||'';
 const a={id:Date.now().toString(36),title:o.title||'Bài đọc',titleVi:o.titleVi||'',level:o.level||lv,kind:mode==='ai'?type:'Tự dán',src:mode==='ai'?'':src,date:Date.now(),paras:(o.paras||[]).filter(x=>x&&x.en)};
-if(!a.paras.length)throw new Error('Không tạo được nội dung');S.reads.unshift(a);save();rid=a.id;vRead()}
-catch(e){msg('Lỗi: '+(e.message||e.code||'không rõ'));const b=$('#rg');if(b)b.disabled=false}}
+if(!a.paras.length)throw new Error('Không tạo được nội dung');LP.end();S.reads.unshift(a);save();rid=a.id;vRead()}
+catch(e){LP.end();msg('Lỗi: '+(e.message||e.code||'không rõ'));const b=$('#rg');if(b)b.disabled=false}}
 function t_ok(){return true}
 function vArt(a){
 $('#v').innerHTML=`<div class='row' style='justify-content:space-between;margin-bottom:8px'><button class='btn' id='rb'>← Danh sách</button><button class='btn' id='rv'>${showVi?'Ẩn':'Hiện'} tiếng Việt</button></div><div class='card'><h2 style='margin:0 0 4px'>${esc(a.title)}</h2><p class='mu' style='margin:0'>${esc(a.titleVi||'')}<br>Tạo ngày ${fmtD(a.date)} · ${esc(a.level)}${/^https?:\/\//.test(a.src||'')?` · <a href='${ea(a.src)}' target='_blank' rel='noopener' style='color:var(--ac)'>nguồn</a>`:''}</p></div><p class='mu'>Chạm vào một từ, hoặc bôi đen một cụm/câu rồi bấm “Phân tích đoạn chọn” để xem cấu trúc ngữ pháp.</p><div id='art'>${a.paras.map(p=>`<div class='card'><p class='en'>${tok(p.en)}</p>${showVi?`<p class='mu vi'>${esc(p.vi)}</p>`:''}</div>`).join('')}</div><div id='sheet'></div>`;
 $('#rb').onclick=()=>{rid=null;vRead()};$('#rv').onclick=()=>{showVi=!showVi;vArt(a)};
-$('#art').onclick=e=>{const s=getSelection();if(s&&s.toString().trim().length>1)return;const w=e.target.closest('.tk');if(w)analyze(w.textContent,w.closest('.en').textContent)}}
+$('#art').onclick=e=>{const s=getSelection();if(s&&s.toString().trim().length>1)return;const w=e.target.closest('.tk');if(w)lookup(w.textContent,w.closest('.en').textContent,{grammar:true})}}
 async function analyze(ph,ctx){const sh=$('#sheet');if(!sh)return;const sample=await getSample();if(!sample)return;
 const sent=((ctx.match(/[^.!?]+[.!?]*/g)||[ctx]).find(s=>s.includes(ph))||ctx).trim();
 sh.className='sheet';sh.innerHTML=`<div class='card'><b>${esc(ph)}</b><p class='mu'>Đang phân tích…</p></div>`;
@@ -384,22 +390,200 @@ try{const k=ph+'|'+sent;let o=AC[k];if(!o){const r=await sample(`Analyze the Eng
 sh.innerHTML=`<div class='card'><div class='row' style='justify-content:space-between;flex-wrap:nowrap'><b>${esc(ph)}</b><button class='btn' id='sx'>✕</button></div><p class='mu'>${esc(o.pos)} · ${esc(o.vi)}</p><h3>Cấu trúc ngữ pháp</h3><p><b>${esc(o.structure)}</b><br><code>${esc(o.formula)}</code></p><h3>Vì sao dùng như vậy</h3><p>${esc(o.why)}</p><h3>Cả câu</h3><p>${esc(sent)}<br><span class='mu'>${esc(o.sentenceVi)}</span></p>${o.tip?`<h3>Mẹo</h3><p>${esc(o.tip)}</p>`:''}</div>`;$('#sx').onclick=()=>{sh.innerHTML='';sh.className=''}}
 catch(e){sh.innerHTML=`<div class='card'><button class='btn' id='sx'>✕</button> Lỗi phân tích: ${esc(e.message||e.code||'không rõ')}</div>`;$('#sx').onclick=()=>{sh.innerHTML='';sh.className=''}}}
 const sb=document.createElement('button');sb.id='sbtn';sb.className='btn pri';sb.hidden=true;sb.textContent='🔍 Phân tích đoạn chọn';document.body.appendChild(sb);
-sb.addEventListener('mousedown',e=>e.preventDefault());sb.onclick=()=>{if(selT)analyze(selT,selC);sb.hidden=true};
+sb.addEventListener('mousedown',e=>e.preventDefault());sb.onclick=()=>{if(selT)lookup(selT,selC,{grammar:true});sb.hidden=true};
 document.addEventListener('selectionchange',()=>{const a=$('#art'),s=getSelection(),t=s?s.toString().trim():'';if(!a||!t||t.length<2||!s.anchorNode||!a.contains(s.anchorNode)){sb.hidden=true;return}const p=s.anchorNode.parentElement&&s.anchorNode.parentElement.closest('.en');selT=t;selC=p?p.textContent:t;sb.hidden=false});
 render();
 </script>
 <script>(function(){var e=document.getElementById('splash');try{if(sessionStorage.getItem('splash')){e.remove();return}sessionStorage.setItem('splash','1')}catch(x){}setTimeout(function(){e.style.opacity=0;setTimeout(function(){e.remove()},650)},1300)})();</script>
+<script type="text/app">
+/* ===== v4: mastery, tiến độ tải, tra nhanh, gộp từ trùng, giải phóng bộ nhớ ===== */
+const LVN=['Mới học','Làm quen','Khá','Vững','Giỏi','Thông thạo'];
+let flt='all',showW=localStorage.getItem('tp_showword')!=='0',sfil='all';
+const LP={on:false,el:null,iv:null,t:'',done:0,total:1,
+start(t){if(this.on)return;this.on=true;this.t=t;this.done=0;this.total=1;this.render('Đang chuẩn bị…')},
+set(d,t,x){this.done=d;if(t)this.total=t;this.render(x)},
+fake(x){clearInterval(this.iv);this.total=100;this.done=6;this.render(x);this.iv=setInterval(()=>{this.done+=(92-this.done)*.05;this.render(x)},600)},
+render(x){if(!this.el){this.el=document.createElement('div');this.el.className='ov';this.el.style.zIndex=45;document.body.appendChild(this.el)}
+const p=Math.round(Math.min(1,this.done/this.total)*100);
+this.el.innerHTML=`<div class='card ovc lp'><b>${esc(this.t)}</b><div class='bar' style='height:12px;margin:12px 0 6px'><i style='width:${p}%'></i></div><div class='row' style='justify-content:space-between;flex-wrap:nowrap'><span class='mu'>${esc(x||'')}</span><b>${p}%</b></div><p class='lpn'>⚠️ Đừng thoát hoặc đóng trang khi đang tải.</p></div>`},
+end(){clearInterval(this.iv);this.on=false;if(this.el){this.el.remove();this.el=null}}};
+window.addEventListener('beforeunload',e=>{if(LP.on){e.preventDefault();e.returnValue=''}});
+async function pool(items,n,fn){let i=0;const res=new Array(items.length);await Promise.all(Array.from({length:Math.min(n,items.length)},async()=>{while(i<items.length){const k=i++;res[k]=await fn(items[k],k)}}));return res}
+const FP=ch=>`Create TOEIC-focused flashcards for these English words: ${JSON.stringify(ch)}.
+Return ONLY a JSON array (no markdown), one object per word, keys: word (exactly as given), ipa (e.g. /kəˈmjuːt/), pos (e.g. "verb (v), noun (n)"), cefr (A1-C2, or a range like "B1–B2"), vi (most common Vietnamese meaning, TOEIC sense first), phr (array of exactly 3 objects {en: a useful, common phrase or collocation containing the word, as used in TOEIC / workplace English; vi: its Vietnamese meaning}), desc (a short English paragraph of 2-3 sentences describing the word's meaning through a natural scene or situation, WITHOUT using the word or its derivatives; use real varied grammar such as tenses, relative clauses, conditionals, passives), descVi (a natural Vietnamese translation of desc), gram (array of 2-3 objects {s: exact phrase copied from desc, why: Vietnamese explanation of why this grammar structure is used there: which tense/structure and what it expresses}), ex (short English example), exVi (Vietnamese translation of ex), pron (short Vietnamese pronunciation tip: stress, tricky sounds). Be accurate and concise.`;
+const FIELDS=['ipa','pos','cefr','vi','phr','desc','descVi','gram','ex','exVi','pron'];
+const needUp=c=>c.min||!c.desc||!c.gram||!c.descVi||!c.phr;
+async function mkCards(sample,ch){for(let t=0;t<2;t++){try{const r=await sample(FP(ch),{cache:false});return parseJ(r.text).filter(c=>c&&c.word)}catch(e){if(t)throw e}}}
+/* --- gộp từ trùng / khác nghĩa --- */
+const baseRel=(a,b)=>a===b||a.startsWith(b+' ')||b.startsWith(a+' ');
+function findDup(c){const k=key(c);for(const d of S.days)for(const w of d.words)if(baseRel(k,key(w)))return w;return null}
+function absorb(w0,c){const k=key(c);w0.more=w0.more||[];const has=p=>w0.more.find(x=>x.p.toLowerCase()===p.toLowerCase());
+(c.more||[]).forEach(m=>{if(!has(m.p))w0.more.push(m)});
+if(key(w0)===k){FIELDS.forEach(f=>{if(c[f]&&!w0[f])w0[f]=c[f]});if(w0.desc&&w0.gram&&w0.phr)delete w0.min;w0.u=Date.now();return 'dup'}
+if(!has(c.word))w0.more.push({p:c.word,vi:c.vi||'',pos:c.pos||'',ex:c.ex||'',exVi:c.exVi||''});w0.u=Date.now();return 'merged'}
+function addCard(D,c){const w0=findDup(c);if(w0)return absorb(w0,c);c.u=Date.now();delete S.del['w:'+key(c)];D.words.push(c);return 'new'}
+function countDups(){let n=0;const seen=[];S.days.forEach(D=>D.words.forEach(w=>{const k=key(w);if(seen.some(x=>baseRel(k,x)))n++;else seen.push(k)}));return n}
+function dedupeAll(){let n=0;const seen=[];S.days.forEach(D=>{D.words=D.words.filter(w=>{const k=key(w),w0=seen.find(x=>baseRel(k,key(x)));if(w0){absorb(w0,w);S.del['w:'+k]=Date.now();n++;return false}seen.push(w);return true})});return n}
+/* --- tạo thẻ --- */
+async function gen(){const msg=t=>{busy=t;const m=$('#msg');if(m)m.textContent=t};
+const txt=$('#tx').value.trim();if(!files.length&&!txt&&!window.forced)return msg('Hãy chọn ảnh hoặc nhập từ trước.');
+const sample=await getSample();if(!sample)return msg('AI chưa sẵn sàng.');
+$('#go').disabled=true;LP.start('Đang tạo flashcard');
+try{let words;
+if(window.forced)words=window.forced;else{LP.set(0,1,'Đang đọc nội dung…');let imgs=[];if(files.length)imgs=await Promise.all(files.map(shrink));
+const r1=await sample('Extract every English vocabulary word or phrase from the attached image(s) and/or this text. Ignore Vietnamese text, page numbers and noise. Fix obvious OCR typos. Return ONLY a JSON array of strings, no markdown.\nText:\n'+txt,{images:imgs,cache:false});
+words=parseJ(r1.text).map(w=>String(w).trim()).filter(Boolean)}
+words=[...new Set(words)];if(!words.length)throw new Error('Không tìm thấy từ nào.');
+const chunks=[];for(let i=0;i<words.length;i+=6)chunks.push(words.slice(i,i+6));
+let fin=0;const failed=[];LP.set(0,words.length,`0/${words.length} từ`);
+const res=await pool(chunks,3,async ch=>{try{const r=await mkCards(sample,ch);fin+=ch.length;LP.set(fin,words.length,`${Math.min(fin,words.length)}/${words.length} từ`);return r}catch(e){failed.push(...ch);fin+=ch.length;LP.set(fin,words.length,`${Math.min(fin,words.length)}/${words.length} từ`);return []}});
+draft=res.flat();window.forced=null;LP.end();
+if(!draft.length)throw new Error('Không tạo được thẻ nào (có thể đã hết lượt miễn phí). Chờ vài phút rồi thử lại.');
+msg(failed.length?`Xong, nhưng ${failed.length} từ chưa tạo được: ${failed.join(', ')}.`:'Xong! Xem lại rồi bấm Lưu.');pv()
+}catch(e){LP.end();window.forced=null;msg('Lỗi: '+(e.message||e.code||'không rõ'))}
+const g=$('#go');if(g)g.disabled=false}
+async function auto(){const msg=t=>{busy=t;const m=$('#msg');if(m)m.textContent=t};
+const sample=await getSample();if(!sample)return msg('AI chưa sẵn sàng.');
+const lv=[...document.querySelectorAll('.lv:checked')].map(x=>x.value),tp=$('#tp').value,n=Math.max(1,Math.min(40,+$('#cn').value||10));
+if(!lv.length)return msg('Hãy chọn ít nhất một cấp độ.');
+const have=S.days.flatMap(d=>d.words.map(key));
+$('#au').disabled=true;$('#msg').scrollIntoView({behavior:'smooth',block:'center'});LP.start('Đang gợi ý và tạo flashcard');LP.set(0,1,'Đang chọn từ cho bạn…');
+try{const r=await sample(`Suggest ${n+4} distinct English vocabulary words (single words or very common short phrases) useful for the TOEIC test, CEFR levels: ${lv.join(', ')}. Topic: ${tp==='random'?'mixed, random (workplace and everyday)':tp}. Prefer high-frequency TOEIC words. Do NOT include any of these already learned words: ${JSON.stringify(have.slice(-300))}. Return ONLY a JSON array of strings, no markdown.`,{cache:false});
+const words=[...new Set(parseJ(r.text).map(w=>String(w).trim()).filter(w=>w&&!have.some(h=>baseRel(w.toLowerCase(),h))))].slice(0,n);
+if(!words.length)throw new Error('Không gợi ý được từ mới, thử lại nhé.');
+files=[];window.forced=words;await gen();window.forced=null;const pp=$('#pv');if(pp)pp.scrollIntoView({behavior:'smooth'})}
+catch(e){LP.end();window.forced=null;msg('Lỗi: '+(e.message||e.code||'không rõ'))}
+const b=$('#au');if(b)b.disabled=false}
+async function upgrade(){const msg=t=>{busy=t;const m=$('#msg');if(m)m.textContent=t};
+const sample=await getSample();if(!sample)return msg('AI chưa sẵn sàng.');
+const all=S.days.flatMap(d=>d.words),need=all.filter(needUp);if(!need.length)return msg('Tất cả thẻ đã đầy đủ.');
+$('#up').disabled=true;$('#msg').scrollIntoView({behavior:'smooth',block:'center'});LP.start('Đang nâng cấp thẻ');
+try{const chunks=[];for(let i=0;i<need.length;i+=6)chunks.push(need.slice(i,i+6));let fin=0,fail=0;LP.set(0,need.length,`0/${need.length} thẻ`);
+await pool(chunks,3,async ch=>{try{const r=await mkCards(sample,ch.map(c=>c.word));for(const n of r){const c=all.find(x=>key(x)===String(n.word||'').toLowerCase().trim());if(c){FIELDS.forEach(f=>{if(!c[f]&&n[f])c[f]=n[f]});delete c.min;c.u=Date.now()}}save()}catch(e){fail+=ch.length}fin+=ch.length;LP.set(fin,need.length,`${Math.min(fin,need.length)}/${need.length} thẻ`)});
+LP.end();msg(fail?`Xong, nhưng ${fail} thẻ chưa nâng cấp được (có thể hết lượt miễn phí). Bấm lại sau.`:'Xong! Đã nâng cấp '+need.length+' thẻ.')}
+catch(e){LP.end();msg('Lỗi: '+(e.message||e.code||'không rõ'))}
+const b=$('#up');if(b)b.disabled=false}
+function pv(){if(!draft)return;const d=+$('#dn').value||1;
+$('#pv').innerHTML=`<div class='card'><b>${draft.length} từ</b><div id='dl'>${draft.map((c,i)=>`<div class='w'><span><b>${esc(c.word)}</b> <span class='mu'>${esc(c.pos)} · ${esc(c.cefr)} · ${esc(c.vi)}</span>${findDup(c)?" <span class='no'>🔗 trùng, sẽ gộp</span>":''}</span><button class='btn' data-i='${i}'>Xoá</button></div>`).join('')}</div><div class='row' style='margin-top:12px'><button class='btn pri' id='sv'>Lưu thành Ngày ${d}</button></div></div>`;
+$('#dl').onclick=e=>{const i=e.target.dataset.i;if(i!=null){draft.splice(+i,1);pv()}};
+$('#sv').onclick=()=>{const day=+$('#dn').value||1;let D=S.days.find(x=>x.day===day);if(!D){D={day,words:[]};S.days.push(D);S.days.sort((a,b)=>a.day-b.day)}
+let n=0,m=0;draft.forEach(c=>{addCard(D,c)==='new'?n++:m++});save();draft=null;files=[];selDay=day;tab='new';render();toast(`Đã thêm ${n} từ mới${m?`, gộp ${m} từ trùng`:''}`)}}
+/* --- mastery theo ngày --- */
+function dayLv(D){const n=D.words.length;if(!n)return{lv:0,pct:0,mean:0,known:0,red:0,n:0};let sum=0,known=0,red=0;D.words.forEach(w=>{const p=S.prog[key(w)]||{};sum+=Math.min(5,p.box||0);if(p.k===1)known++;if(p.k===0)red++});const mean=sum/n;return{lv:Math.min(5,Math.floor(mean)),pct:mean/5*100,mean,known,red,n}}
+const seg=m=>`<div class='seg'>${[0,1,2,3,4].map(i=>`<span><i style='width:${Math.max(0,Math.min(1,m-i))*100}%'></i></span>`).join('')}</div>`;
+function hud(){const g=(S.day&&S.day.d===today())?S.day.n:0,D=S.days.find(d=>d.day===selDay)||S.days[S.days.length-1],L=D?dayLv(D):null;
+$('#hud').innerHTML=`<div class='hud'><span class='chip'>🔥 ${S.streak||0}</span><button class='chip' data-go='read' title='Đọc bài song ngữ'>📖</button>${L?`<span class='chip' title='Mức thông thạo của Ngày ${D.day}'>Ngày ${D.day} · Lv ${L.lv}/5</span><div class='xp'><i style='width:${L.pct}%'></i></div>`:`<div class='xp'></div>`}<span class='chip'>🎯 ${Math.min(g,20)}/20</span><span class='chip' title='Đồng bộ'>${syncSt}</span></div>`}
+/* --- học thẻ --- */
+const FLN={all:'Tất cả',no:'Chưa thuộc',yes:'Thuộc'};
+const stOf=c=>{const p=S.prog[key(c)];return p&&p.k===1?'yes':'no'};
+function pick(){const now=Date.now();let L;
+if(mode==='new'){const D=S.days.find(x=>x.day===selDay)||S.days[S.days.length-1];L=D?D.words.filter(c=>flt==='all'||stOf(c)===flt):[];return L.sort(()=>Math.random()-.5)}
+L=allUpTo(selDay).filter(c=>flt==='all'||stOf(c)===flt);
+return L.map(c=>{const p=S.prog[key(c)]||{box:0,due:0,miss:0};return{c,s:(now>=p.due?10:0)+p.miss*2+(p.box===0?3:0)+Math.random()*4}}).sort((a,b)=>b.s-a.s).slice(0,20).map(x=>x.c)}
+function vStudy(m){const old=document.getElementById('lk');if(old)old.remove();
+if(!S.days.length){$('#v').innerHTML=`<div class='card'>Chưa có bộ từ nào. Vào tab “Thêm từ” để gửi ảnh nhé.</div>`;return}
+if(!selDay||!S.days.find(d=>d.day===selDay))selDay=S.days[S.days.length-1].day;
+const D=S.days.find(d=>d.day===selDay),L=dayLv(D);hud();
+let h=`<div class='row' style='margin-bottom:8px'><span>${m==='new'?'Bộ ngày':'Tổng ôn từ ngày 1 đến ngày'}</span><select id='sd'>${S.days.map(d=>`<option value='${d.day}' ${d.day===selDay?'selected':''}>${d.day}</option>`).join('')}</select><button class='btn' id='rs'>Chơi lại</button><button class='btn' id='fl'>Hiện: ${FLN[flt]}</button><button class='btn' id='sw' title='Hiện hoặc ẩn từ tiếng Anh ở mặt trước'>${showW?'👁 Từ: hiện':'🙈 Từ: ẩn'}</button></div><div class='mu' style='display:flex;justify-content:space-between'><span>Ngày ${D.day} · Lv ${L.lv}/5 · ${LVN[L.lv]}</span><span>✅ ${L.known} · ❌ ${L.red}</span></div>${seg(L.mean)}`;
+if(!q.length||mode!==m){mode=m;q=pick();qi=0;flip=false;combo=0;ok0=0;best=0}
+const nav=`<div class='row' style='justify-content:space-between;margin:10px 0'><button class='btn' id='pv0' ${qi<=0?'disabled':''}>◀ Trước</button><span class='mu'>${q.length?`Thẻ ${Math.min(qi+1,q.length)}/${q.length}`:''}</span><button class='btn' id='nx0' ${qi>=q.length?'disabled':''}>Sau ▶</button></div>`;
+if(!q.length){h+=`<div class='card'>Không có thẻ nào ở chế độ “${FLN[flt]}”. Bấm nút “Hiện” để đổi chế độ.</div>`}
+else if(qi>=q.length){h+=`${nav}<div class='card' style='text-align:center'><p class='big'>🎉</p><b>Hoàn thành ${q.length} thẻ!</b><p class='mu'>Nhớ đúng ${ok0}/${q.length} · Combo cao nhất x${best}</p><p class='mu'>Bấm “Chơi lại” để ôn thêm một lượt.</p></div>`}
+else{const c=q[qi],desc=c.desc||(c.min?'Thẻ thêm nhanh, chưa có mô tả. Vào tab “Thêm từ” → “Nâng cấp thẻ cũ” để AI bổ sung.':'Thẻ cũ chưa có mô tả. Vào tab “Thêm từ” → “Nâng cấp thẻ cũ” để tạo mô tả và phân tích ngữ pháp.'),hint=c.word.split('').map((ch,i)=>i===0||ch===' '?ch:'_').join(' ');
+const phr=(c.phr&&c.phr.length)?c.phr.map(x=>`<p>• <b>${esc(x.en)}</b> — ${esc(x.vi)}</p>`).join(''):(c.col&&c.col.length?`<p>${esc(c.col.join(' · '))}</p>`:`<p class='mu'>Chưa có. Bấm “Nâng cấp thẻ cũ” để AI bổ sung.</p>`);
+const more=(c.more&&c.more.length)?`<h3>Nghĩa / cụm khác</h3>${c.more.map(x=>`<p>• <b>${esc(x.p)}</b> — ${esc(x.vi)}${x.pos?` <span class='mu'>(${esc(x.pos)})</span>`:''}</p>`).join('')}`:'';
+const front=`<span class='tag' style='align-self:flex-start'>${esc(c.pos)} · ${esc(c.cefr)}</span>${showW?`<p class='fw'>${esc(c.word)} <button class='btn' id='sp' style='padding:2px 10px'>🔊</button></p><p class='mu' style='margin:0 0 6px'>${esc(c.ipa)}</p>`:''}<p class='desc'>${tok(desc)}</p>${c.descVi?`<button class='dtog'>▼ Xem tiếng Việt</button><p class='dvi' hidden>${esc(c.descVi)}</p>`:''}${(c.gram&&c.gram.length)?`<div class='gr'><b>🔍 Phân tích ngữ pháp</b>${c.gram.map(g=>`<p><b>${esc(g.s)}</b><br>${esc(g.why)}</p>`).join('')}</div>`:''}${showW?'':`<p class='hint'>${esc(hint)}</p>`}<p class='tap'>Chạm để lật ✨ · chạm một từ trong câu để tra nghĩa</p>`;
+const back=`<div class='back'><p class='big' style='font-size:28px'>${esc(c.word)} <span class='tag'>${esc(c.cefr)}</span></p><p class='mu'>${esc(c.ipa)} · ${esc(c.pos)} <button class='btn' id='sp' style='padding:3px 10px'>🔊</button></p><h3>Nghĩa</h3><p><b>${esc(c.vi)}</b></p><h3>Cụm từ hữu ích</h3>${phr}${more}<h3>Ví dụ</h3><p>${esc(c.ex)}<br><span class='mu'>${esc(c.exVi)}</span></p><h3>Phát âm</h3><p>${esc(c.pron)}</p><p class='mu' style='text-align:center;margin-top:12px'>↺ Chạm để lật lại</p></div>`;
+h+=`<div class='prog'><i style='width:${qi/q.length*100}%'></i></div><div class='mu row' style='justify-content:space-between'><span></span>${combo>1?`<span class='combo'>🔥 Combo x${combo}</span>`:''}</div><div class='scene'><div class='fcc in ${flip?'flipped':''}' id='fc'><div class='face front'>${front}</div><div class='face backf'>${back}</div></div></div><div class='act'><button class='btn no' id='n'>Chưa thuộc</button><button class='btn ok' id='y'>Thuộc rồi!</button></div>${nav}`}
+$('#v').innerHTML=h;
+$('#sd').onchange=e=>{selDay=+e.target.value;q=[];vStudy(m)};$('#rs').onclick=()=>{q=[];vStudy(m)};
+$('#fl').onclick=()=>{flt={all:'no',no:'yes',yes:'all'}[flt];q=[];vStudy(m)};
+$('#sw').onclick=()=>{showW=!showW;localStorage.setItem('tp_showword',showW?'1':'0');vStudy(m)};
+if($('#pv0'))$('#pv0').onclick=()=>{if(qi>0){qi--;flip=false;vStudy(m)}};
+if($('#nx0'))$('#nx0').onclick=()=>{if(qi<q.length){qi++;flip=false;vStudy(m)}};
+if(!q.length||qi>=q.length){if(q.length&&ok0)setTimeout(()=>boom($('#v')),100);return}
+const fc=$('#fc');fc.onclick=e=>{const t=e.target;
+if(t.closest('.dtog')){const b=t.closest('.dtog'),p2=b.nextElementSibling;p2.hidden=!p2.hidden;b.textContent=p2.hidden?'▼ Xem tiếng Việt':'▲ Ẩn tiếng Việt';return}
+if(t.id==='sp'){speak(q[qi].word);return}
+const tk=t.closest('.tk');if(tk){lookup(tk.textContent,q[qi].desc||'',{});return}
+flip=!flip;fc.classList.toggle('flipped',flip);if(flip&&!showW)speak(q[qi].word)};
+const rate=ok=>{const c=q[qi],k=key(c),p=S.prog[k]||{box:0,due:0,miss:0},DD=S.days.find(d=>d.words.includes(c)),l0=DD?dayLv(DD).lv:0;
+if(ok)p.box=Math.min(5,p.box+1);else{p.box=0;p.miss++}
+p.k=ok?1:0;p.due=Date.now()+INT[p.box]*864e5;p.u=Date.now();S.prog[k]=p;
+if(ok){combo++;ok0++;best=Math.max(best,combo);boom($('#y'));try{navigator.vibrate&&navigator.vibrate(25)}catch(x){}}else combo=0;
+const t=today();if(!S.day||S.day.d!==t)S.day={d:t,n:0};S.day.n++;
+if(S.last!==t){const y=new Date(Date.now()-864e5).toDateString();S.streak=S.last===y?(S.streak||0)+1:1;S.last=t}
+const l1=DD?dayLv(DD).lv:0;if(l1>l0)toast(`⚡ Ngày ${DD.day} lên Lv ${l1}/5 · ${LVN[l1]}`);
+save();hud();qi++;flip=false;setTimeout(()=>vStudy(m),ok?380:80)};
+$('#y').onclick=()=>rate(true);$('#n').onclick=()=>rate(false)}
+/* --- tra nhanh bằng Google Dịch (không chính thức), dự phòng AI --- */
+const TC={};
+async function tr(w){const r=await fetch('https://translate.googleapis.com/translate_a/single?client=gtx&sl=en&tl=vi&dt=t&dt=bd&q='+encodeURIComponent(w));if(!r.ok)throw new Error('HTTP '+r.status);const j=await r.json();
+return{vi:(j[0]||[]).map(x=>x[0]).join('').trim(),dict:(j[1]||[]).map(e=>({pos:e[0],words:(e[1]||[]).slice(0,4)}))}}
+function ensureLk(){let e=document.getElementById('sheet');if(e)return e;e=document.getElementById('lk');if(!e){e=document.createElement('div');e.id='lk';document.body.appendChild(e)}return e}
+async function lookup(ph,ctx,o){o=o||{};ph=String(ph).trim();const sh=ensureLk();sh.className='sheet';ctx=ctx||'';
+const sent=((ctx.match(/[^.!?]+[.!?]*/g)||[ctx]).find(s=>s.includes(ph))||ctx).trim();
+sh.innerHTML=`<div class='card'><div class='row' style='justify-content:space-between;flex-wrap:nowrap'><b>${esc(ph)}</b><button class='btn' id='lkx'>✕</button></div><p class='mu'>Đang tra…</p></div>`;
+$('#lkx').onclick=()=>{sh.innerHTML='';sh.className=''};
+const ck=ph.toLowerCase();let r=TC[ck];
+if(!r){try{r=await tr(ph)}catch(e){try{const s=await getSample();const a=await s(`Translate the English word or phrase ${JSON.stringify(ph)} into Vietnamese. Return ONLY a JSON object with keys vi (short Vietnamese meaning) and pos (part of speech, in English).`,{cache:false});const j=parseO(a.text);r={vi:j.vi,dict:j.pos?[{pos:j.pos,words:[]}]:[],ai:1}}catch(e2){sh.innerHTML=`<div class='card'><div class='row' style='justify-content:space-between;flex-wrap:nowrap'><b>${esc(ph)}</b><button class='btn' id='lkx'>✕</button></div><p class='mu'>Không tra được: ${esc(e2.message||'lỗi mạng')}</p></div>`;$('#lkx').onclick=()=>{sh.innerHTML='';sh.className=''};return}}TC[ck]=r}
+const days=S.days.map(d=>d.day),def=selDay||days[days.length-1]||'new';
+sh.innerHTML=`<div class='card'><div class='row' style='justify-content:space-between;flex-wrap:nowrap'><b style='font-size:18px'>${esc(ph)} <button class='btn' id='lks' style='padding:2px 10px'>🔊</button></b><button class='btn' id='lkx'>✕</button></div><p style='margin:6px 0'><b>${esc(r.vi)}</b></p>${r.dict.map(e=>`<p class='mu' style='margin:2px 0'>${esc(e.pos)}: ${esc((e.words||[]).join(', '))}</p>`).join('')}<div class='row' style='margin-top:10px'><select id='lkd'>${days.map(d=>`<option value='${d}' ${d===def?'selected':''}>Ngày ${d}</option>`).join('')}<option value='new' ${days.length?'':'selected'}>Ngày mới</option></select><button class='btn pri' id='lka'>＋ Thêm vào kho</button>${o.grammar?`<button class='btn' id='lkg'>🔍 Ngữ pháp (AI)</button>`:''}</div>${r.ai?`<p class='mu'>(Tra bằng AI vì Google Dịch không phản hồi.)</p>`:''}</div>`;
+$('#lkx').onclick=()=>{sh.innerHTML='';sh.className=''};$('#lks').onclick=()=>speak(ph);
+if($('#lkg'))$('#lkg').onclick=()=>analyze(ph,ctx);
+$('#lka').onclick=()=>{const v=$('#lkd').value;let D;if(v==='new'){const nd=(S.days.length?Math.max(...S.days.map(d=>d.day)):0)+1;D={day:nd,words:[]};S.days.push(D);S.days.sort((a,b)=>a.day-b.day)}else D=S.days.find(d=>d.day===+v);
+const res=addCard(D,{word:ph,vi:r.vi,pos:(r.dict[0]&&r.dict[0].pos)||'',cefr:'',ipa:'',ex:sent,exVi:'',min:1});save();hud();toast(res==='new'?`Đã thêm “${ph}” vào Ngày ${D.day}`:`Đã gộp “${ph}” vào từ có sẵn`);sh.innerHTML='';sh.className=''}}
+/* --- tiến độ: tìm, lọc, đỏ từ chưa thuộc, gộp trùng --- */
+function vStats(){const all=S.days.flatMap(d=>d.words),n=all.length,known=all.filter(c=>stOf(c)==='yes').length,red=all.filter(c=>(S.prog[key(c)]||{}).k===0).length,due=all.filter(c=>Date.now()>=((S.prog[key(c)]||{}).due||0)).length,dups=countDups();
+$('#v').innerHTML=`<div class='card'><b>${S.days.length} ngày · ${n} từ</b><p class='mu'>✅ Thuộc: ${known} · ❌ Chưa thuộc: <span class='no'>${red}</span> · Cần ôn hôm nay: ${due}</p><div class='bar'><i style='width:${n?known/n*100:0}%'></i></div></div><div class='card'><div class='row' style='flex-wrap:nowrap'><input class='in' id='sq' type='search' placeholder='🔎 Tìm từ hoặc nghĩa…' value='${ea(qs)}' style='margin:0;flex:1;min-width:0'><button class='btn pri' id='ad'>＋ Thêm từ</button></div><div class='row' style='margin-top:8px'><select id='sf'><option value='all'>Tất cả từ</option><option value='no'>❌ Chưa thuộc</option><option value='yes'>✅ Thuộc</option><option value='new'>⚪ Chưa học</option></select>${dups?`<button class='btn' id='dd'>🔗 Gộp ${dups} từ trùng</button>`:''}</div></div><div id='wl'></div><p class='mu'>Từ màu đỏ là từ bạn đã bấm “Chưa thuộc”. Dữ liệu đồng bộ giữa các thiết bị đăng nhập cùng tài khoản.</p>`;
+$('#sf').value=sfil;$('#sf').onchange=e=>{sfil=e.target.value;wlist()};
+$('#sq').oninput=e=>{qs=e.target.value;wlist()};$('#ad').onclick=()=>edit(null);
+if($('#dd'))$('#dd').onclick=()=>{if(confirm('Gộp các từ trùng hoặc cùng gốc (ví dụ “run” và “run out”) thành một thẻ nhiều nghĩa?')){const k=dedupeAll();save();toast(`Đã gộp ${k} từ`);vStats()}};
+$('#wl').onclick=e=>{const b=e.target.closest('button');if(!b)return;if(b.dataset.e!=null){const c=S.days.flatMap(d=>d.words).find(c=>key(c)===b.dataset.e);if(c)edit(c)}else if(b.dataset.x!=null){const k=b.dataset.x;if(delArm===k)delWord(k);else{delArm=k;wlist();setTimeout(()=>{if(delArm===k){delArm=null;if($('#wl'))wlist()}},3000)}}};
+wlist();hud()}
+function wlist(){const t=qs.trim().toLowerCase();
+const h=S.days.map(d=>{const L=dayLv(d),ws=d.words.filter(c=>{const p=S.prog[key(c)],k=p?p.k:undefined;if(sfil==='no'&&k!==0)return false;if(sfil==='yes'&&k!==1)return false;if(sfil==='new'&&k!==undefined)return false;return !t||(c.word+' '+(c.vi||'')).toLowerCase().includes(t)});if(!ws.length)return'';
+return `<div class='card'><div class='row' style='justify-content:space-between;flex-wrap:nowrap'><span><b>Ngày ${d.day}</b> <span class='mu'>(${ws.length}/${d.words.length} từ)</span></span><span class='mu'>Lv ${L.lv}/5 · ${LVN[L.lv]}</span></div>${seg(L.mean)}${ws.map(c=>{const p=S.prog[key(c)],red=p&&p.k===0,k=ea(key(c));return `<div class='w ${red?'rw':''}'><span><b class='${red?'no':''}'>${red?'● ':''}${esc(c.word)}</b>${c.more&&c.more.length?` <span class='tag'>+${c.more.length}</span>`:''} <span class='mu'>${esc(c.vi)}</span></span><span class='row' style='flex-wrap:nowrap'><span class='tag'>${esc(c.cefr)}</span><button class='btn' data-e='${k}'>✏️</button><button class='btn' data-x='${k}'>${delArm===key(c)?'Xoá?':'🗑'}</button></span></div>`}).join('')}</div>`}).join('');
+$('#wl').innerHTML=h||`<div class='card'>Không tìm thấy từ nào.</div>`}
+/* --- sửa / thêm từ --- */
+const p2s=a=>(a||[]).map(x=>x.en+' = '+x.vi).join('; '),s2p=t=>t.split(';').map(x=>x.trim()).filter(Boolean).map(x=>{const i=x.indexOf('=');return i<0?{en:x,vi:''}:{en:x.slice(0,i).trim(),vi:x.slice(i+1).trim()}});
+const m2s=a=>(a||[]).map(x=>x.p+' = '+x.vi).join('; ');
+function edit(c){const f=[['word','Từ'],['ipa','Phiên âm'],['pos','Từ loại'],['cefr','CEFR'],['vi','Nghĩa tiếng Việt'],['desc','Mô tả mặt trước (EN)'],['descVi','Bản dịch mô tả (VI)'],['ex','Ví dụ (EN)'],['exVi','Ví dụ (VI)'],['pron','Mẹo phát âm']],isNew=!c;c=c||{};
+const o=document.createElement('div');o.className='ov';
+o.innerHTML=`<div class='card ovc'><b>${isNew?'Thêm từ mới':'Sửa từ'}</b>${f.map(([k,l])=>`<label class='mu'>${l}</label><input class='in' data-k='${k}' value='${ea(c[k]||'')}'>`).join('')}<label class='mu'>Cụm từ hữu ích (dạng: cụm = nghĩa; cụm = nghĩa)</label><input class='in' data-k='phr' value='${ea(p2s(c.phr))}'><label class='mu'>Nghĩa / cụm khác (dạng: cụm = nghĩa; …)</label><input class='in' data-k='more' value='${ea(m2s(c.more))}'>${isNew?`<label class='mu'>Lưu vào ngày</label><input class='in' id='ed' type='number' value='${S.days.length?S.days[S.days.length-1].day:1}'>`:''}<p class='mu' id='em'></p><div class='row'><button class='btn pri' id='eok'>Lưu</button><button class='btn' id='eno'>Huỷ</button></div></div>`;
+document.body.appendChild(o);$('#eno').onclick=()=>o.remove();
+$('#eok').onclick=()=>{const v={};o.querySelectorAll('[data-k]').forEach(i=>v[i.dataset.k]=i.value.trim());
+if(!v.word)return $('#em').textContent='Cần nhập từ.';
+v.phr=v.phr?s2p(v.phr):[];const old=c.more||[];v.more=(v.more||'').split(';').map(x=>x.trim()).filter(Boolean).map(x=>{const i=x.indexOf('='),p=(i<0?x:x.slice(0,i)).trim(),vi=i<0?'':x.slice(i+1).trim(),e=old.find(m=>m.p.toLowerCase()===p.toLowerCase())||{};return Object.assign({},e,{p,vi})});
+if(isNew){const day=+$('#ed').value||1;let D=S.days.find(x=>x.day===day);if(!D){D={day,words:[]};S.days.push(D);S.days.sort((a,b)=>a.day-b.day)}
+const r=addCard(D,v);if(r!=='new')toast(r==='dup'?'Từ đã có, đã bổ sung phần còn thiếu':'Đã gộp vào từ cùng gốc')}
+else{const ok=key(c);Object.assign(c,v);delete c.min;c.u=Date.now();const nk=key(c);if(nk!==ok){if(S.prog[ok]){S.prog[nk]=S.prog[ok];delete S.prog[ok]}S.del['w:'+ok]=Date.now()}}
+save();o.remove();vStats()}}
+/* --- giải phóng bộ nhớ --- */
+function freeUI(box){if(!box)return;const kb=n=>Math.max(1,Math.round(n/1024))+' KB',js=o=>JSON.stringify(o===undefined?'':o).length;
+const words=S.days.flatMap(d=>d.words),svgSz=words.reduce((a,c)=>a+(c.svg?c.svg.length:0)+(c.emo?c.emo.length:0),0),live=new Set(words.map(key)),orph=Object.keys(S.prog).filter(k=>!live.has(k)),old=S.reads.filter(a=>Date.now()-a.date>30*864e5),readSz=js(S.reads);
+const items=[{n:'Hình minh hoạ cũ (SVG/emoji, không còn hiển thị)',sz:svgSz,id:'f1',btn:'Xoá hình cũ',on:svgSz>0},{n:`Bài đọc (${S.reads.length} bài)`,sz:readSz,id:'f2',btn:`Xoá bài cũ hơn 30 ngày (${old.length})`,on:old.length>0,id2:'f2b',btn2:'Xoá tất cả bài',on2:S.reads.length>0},{n:`Tiến độ của từ đã xoá (${orph.length} mục)`,sz:js(orph.map(k=>S.prog[k])),id:'f3',btn:'Dọn',on:orph.length>0}];
+const big=items.slice().sort((a,b)=>b.sz-a.sz)[0];
+box.innerHTML=`<p class='mu'>${big.sz>1024?`Đề xuất: bắt đầu từ “${esc(big.n)}” (${kb(big.sz)}). `:'Dữ liệu của bạn đang rất nhẹ. '}Nên bấm “Xuất dữ liệu” để sao lưu trước khi xoá.</p>`+items.map(i=>`<div class='w'><span>${esc(i.n)}<br><span class='mu'>${kb(i.sz)}</span></span><span class='row' style='flex-wrap:nowrap'>${i.on?`<button class='btn' id='${i.id}'>${esc(i.btn)}</button>`:''}${i.on2?`<button class='btn' id='${i.id2}'>${esc(i.btn2)}</button>`:''}</span></div>`).join('')+`<div class='w'><span>Bộ nhớ đệm của app (cache)<br><span class='mu'>Tải lại tự động lần sau</span></span><button class='btn' id='f4'>Xoá cache</button></div>`;
+const done=m=>{save();toast(m);freeUI(box)};
+const b=(id,fn)=>{const e=box.querySelector('#'+id);if(e)e.onclick=fn};
+b('f1',()=>{if(confirm('Xoá hình minh hoạ cũ của tất cả thẻ?')){words.forEach(c=>{if(c.svg||c.emo){delete c.svg;delete c.emo;c.u=Date.now()}});done('Đã xoá hình cũ')}});
+b('f2',()=>{if(confirm('Xoá các bài đọc cũ hơn 30 ngày?')){old.forEach(a=>{S.del['r:'+a.id]=Date.now()});S.reads=S.reads.filter(a=>!old.includes(a));done('Đã xoá bài đọc cũ')}});
+b('f2b',()=>{if(confirm('Xoá TẤT CẢ bài đọc?')){S.reads.forEach(a=>{S.del['r:'+a.id]=Date.now()});S.reads=[];done('Đã xoá tất cả bài đọc')}});
+b('f3',()=>{orph.forEach(k=>delete S.prog[k]);done('Đã dọn tiến độ thừa')});
+b('f4',async()=>{try{const ks=await caches.keys();await Promise.all(ks.map(k=>caches.delete(k)));toast('Đã xoá cache')}catch(e){toast('Không xoá được cache')}})}
+</script>
 <script type="text/app">
 (function(){var K='tp_cfg',get=function(){try{return JSON.parse(localStorage.getItem(K))||{}}catch(e){return{}}},DM={gemini:'gemini-3.8-flash',anthropic:'claude-sonnet-4-6'};
 var b=document.createElement('button');b.className='chip';b.textContent='⚙️';b.title='Cài đặt';b.style.cssText='margin-left:auto;cursor:pointer;color:inherit;font:inherit;font-size:18px';document.querySelector('.brand').appendChild(b);
 try{var lb=+localStorage.getItem('tp_lastbk')||0;if(!lb)localStorage.setItem('tp_lastbk',Date.now());else if(!authed()&&S.days.length&&Date.now()-lb>7*864e5)warn('📦 Đã hơn 7 ngày chưa sao lưu. Bấm ⚙️ → Xuất dữ liệu. Chạm để ẩn.')}catch(e){}
 function openSettings(showGuide){var c=get(),pv=c.prov||'gemini',o=document.createElement('div');o.className='ov';
 var acc=!fbOK?"<p class='mu'>Chưa cấu hình tài khoản (điền file config.js để bật đăng nhập).</p>":authed()?"<p class='mu'>Đang đăng nhập: <b>"+ea((JSON.parse(localStorage.getItem('tp_auth')||'{}')).email||'')+"</b><br>Dữ liệu tự đồng bộ giữa các thiết bị đăng nhập cùng tài khoản.</p><button class='btn' id='clo'>Đăng xuất</button>":"<p class='mu'>Đang dùng không tài khoản (dữ liệu chỉ nằm trên máy này).</p><button class='btn pri' id='cli'>Đăng nhập / Đăng ký</button>";
-o.innerHTML="<div class='card ovc'><b>👤 Tài khoản</b>"+acc+"<hr style='border-color:var(--bd);margin:14px 0'><b>⚙️ Cài đặt AI</b><label class='mu'>Nhà cung cấp</label><select class='in' id='cp'><option value='gemini'"+(pv==='gemini'?' selected':'')+">Google Gemini (có gói miễn phí)</option><option value='anthropic'"+(pv==='anthropic'?' selected':'')+">Anthropic Claude (trả phí)</option></select><label class='mu'>API key (chỉ lưu trên máy này, không đồng bộ)</label><input class='in' id='ck' type='password' placeholder='AIza… hoặc sk-ant-…' value='"+ea(c.key||'')+"'><p class='mu' id='chint'></p><details id='cg'><summary class='mu' style='cursor:pointer'>📖 Hướng dẫn lấy API key</summary><div id='cgb' class='mu' style='margin:6px 0 10px'></div></details><label class='mu'>Model</label><input class='in' id='cm' value='"+ea((c.model&&c.model!=='gemini-2.5-flash')?c.model:DM[pv])+"'><div class='row'><button class='btn pri' id='cs'>Lưu</button><button class='btn' id='cx'>Đóng</button></div><hr style='border-color:var(--bd);margin:14px 0'><b>💾 Bộ nhớ trên máy này</b><p class='mu' id='cst'>Đang kiểm tra…</p><div class='bar'><i id='cbar' style='width:0'></i></div><hr style='border-color:var(--bd);margin:14px 0'><b>Sao lưu / chuyển máy</b><p class='mu'>Xuất file rồi nhập vào máy khác. Nhập sẽ gộp với dữ liệu đang có.</p><div class='row'><button class='btn' id='ce'>⬇️ Xuất dữ liệu</button><label class='btn'>⬆️ Nhập dữ liệu<input id='ci' type='file' accept='.json' hidden></label></div><p class='mu' id='cmsg'></p></div>";
+o.innerHTML="<div class='card ovc'><b>👤 Tài khoản</b>"+acc+"<hr style='border-color:var(--bd);margin:14px 0'><b>⚙️ Cài đặt AI</b><label class='mu'>Nhà cung cấp</label><select class='in' id='cp'><option value='gemini'"+(pv==='gemini'?' selected':'')+">Google Gemini (có gói miễn phí)</option><option value='anthropic'"+(pv==='anthropic'?' selected':'')+">Anthropic Claude (trả phí)</option></select><label class='mu'>API key (chỉ lưu trên máy này, không đồng bộ)</label><input class='in' id='ck' type='password' placeholder='AIza… hoặc sk-ant-…' value='"+ea(c.key||'')+"'><p class='mu' id='chint'></p><details id='cg'><summary class='mu' style='cursor:pointer'>📖 Hướng dẫn lấy API key</summary><div id='cgb' class='mu' style='margin:6px 0 10px'></div></details><label class='mu'>Model</label><input class='in' id='cm' value='"+ea((c.model&&c.model!=='gemini-2.5-flash')?c.model:DM[pv])+"'><div class='row'><button class='btn pri' id='cs'>Lưu</button><button class='btn' id='cx'>Đóng</button></div><hr style='border-color:var(--bd);margin:14px 0'><b>💾 Bộ nhớ trên máy này</b><p class='mu' id='cst'>Đang kiểm tra…</p><div class='bar'><i id='cbar' style='width:0'></i></div><hr style='border-color:var(--bd);margin:14px 0'><b>🧹 Giải phóng bộ nhớ</b><div id='cfree'></div><hr style='border-color:var(--bd);margin:14px 0'><b>Sao lưu / chuyển máy</b><p class='mu'>Xuất file rồi nhập vào máy khác. Nhập sẽ gộp với dữ liệu đang có.</p><div class='row'><button class='btn' id='ce'>⬇️ Xuất dữ liệu</button><label class='btn'>⬆️ Nhập dữ liệu<input id='ci' type='file' accept='.json' hidden></label></div><p class='mu' id='cmsg'></p></div>";
 document.body.appendChild(o);var q=function(x){return o.querySelector(x)},m=function(t){q('#cmsg').textContent=t};
 var G="<ol style='margin:0;padding-left:20px;line-height:1.7'><li>Bấm nút bên dưới để mở trang lấy key (đăng nhập tài khoản Google).</li><li>Bấm <b>Create API key</b> (nếu được hỏi chọn project, chọn project có sẵn hoặc cho tạo mới).</li><li>Bấm biểu tượng <b>copy</b> để chép key (dạng <b>AIza…</b>).</li><li>Quay lại đây, <b>dán vào ô API key</b> ở trên rồi bấm <b>Lưu</b>.</li></ol><a class='btn pri' href='https://aistudio.google.com/app/apikey' target='_blank' rel='noopener' style='display:inline-block;margin-top:8px'>🔑 Mở trang lấy API key</a><p style='margin:8px 0 0'>Lưu ý: gói miễn phí có giới hạn lượt dùng theo phút và theo ngày. Mỗi thiết bị nhập key một lần. Đừng chia sẻ key cho người khác. Nếu trang yêu cầu nhập thẻ hoặc bật thanh toán thì dừng lại, bạn không cần làm bước đó.</p>",A="<ol style='margin:0;padding-left:20px;line-height:1.7'><li>Bấm nút bên dưới, đăng nhập console.anthropic.com.</li><li>Nạp trước một ít tiền ở mục <b>Billing</b> (Claude API tính phí theo lượng dùng).</li><li>Vào <b>API Keys → Create Key</b>, copy key (dạng <b>sk-ant-…</b>).</li><li>Quay lại đây, dán vào ô API key rồi bấm <b>Lưu</b>.</li></ol><a class='btn pri' href='https://console.anthropic.com/settings/keys' target='_blank' rel='noopener' style='display:inline-block;margin-top:8px'>🔑 Mở trang lấy API key</a>";var hint=function(){var g=q('#cp').value==='gemini';q('#chint').textContent=g?'Dùng Gemini: có gói miễn phí, chỉ cần tài khoản Google.':'Dùng Claude: cần nạp tiền, tính theo lượng dùng.';q('#cgb').innerHTML=g?G:A};hint();if(showGuide)q('#cg').open=true;
 q('#cp').onchange=function(){var v=q('#cp').value;if(q('#cm').value===DM.gemini||q('#cm').value==='gemini-2.5-flash'||q('#cm').value===DM.anthropic)q('#cm').value=DM[v];hint()};
-q('#cx').onclick=function(){o.remove()};
+q('#cx').onclick=function(){o.remove()};freeUI(q('#cfree'));
 q('#cs').onclick=function(){var v=q('#cp').value;localStorage.setItem(K,JSON.stringify({prov:v,key:q('#ck').value.trim(),model:q('#cm').value.trim()||DM[v]}));m('Đã lưu.')};
 if(q('#cli'))q('#cli').onclick=function(){localStorage.removeItem('tp_guest');location.reload()};
 if(q('#clo'))q('#clo').onclick=async function(){try{await push()}catch(e){}if(syncSt!=='☁️'&&!confirm('Dữ liệu có thể chưa đồng bộ xong. Vẫn đăng xuất và xoá dữ liệu trên máy này?'))return;var uid=localStorage.getItem('tp_uid');try{await idbDel('tp_data_'+uid)}catch(e){}localStorage.removeItem('tp_data_'+uid);localStorage.removeItem('tp_auth');localStorage.removeItem('tp_uid');location.reload()};
